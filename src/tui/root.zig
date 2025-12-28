@@ -42,6 +42,14 @@ pub const freeConstraintSizes = constraint_mod.freeSizes;
 pub const Label = @import("Label.zig").Label;
 pub const Button = @import("Button.zig").Button;
 
+// Decorator widgets (Phase 2)
+const padding_mod = @import("Padding.zig");
+pub const Padding = padding_mod.Padding;
+pub const Insets = padding_mod.Insets;
+const border_mod = @import("Border.zig");
+pub const Border = border_mod.Border;
+pub const BoxStyle = border_mod.BoxStyle;
+
 // Focus management (Phase 4)
 pub const FocusManager = @import("FocusManager.zig").FocusManager;
 
