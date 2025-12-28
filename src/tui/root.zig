@@ -6,6 +6,9 @@
 //! - Focus management
 //! - Optional MVU application runtime
 
+// Rendering abstractions (Phase 0)
+pub const PlaneView = @import("PlaneView.zig").PlaneView;
+
 // Widget system (Phase 1)
 // pub const Widget = @import("Widget.zig");
 // pub const Theme = @import("Theme.zig");
