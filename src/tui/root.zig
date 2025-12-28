@@ -23,6 +23,11 @@ const theme_mod = @import("Theme.zig");
 pub const Theme = theme_mod.Theme;
 pub const Style = theme_mod.Style;
 
+// Widget identity (Phase 1)
+const id_mod = @import("Id.zig");
+pub const Id = id_mod.Id;
+pub const IdStack = id_mod.IdStack;
+
 // Focus management (to be implemented)
 // pub const Focus = @import("Focus.zig");
 // pub const State = @import("State.zig");
