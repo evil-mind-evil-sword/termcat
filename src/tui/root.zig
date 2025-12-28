@@ -55,6 +55,7 @@ const flex_mod = @import("Flex.zig");
 pub const Flex = flex_mod.Flex;
 pub const FlexDirection = flex_mod.Direction;
 pub const FlexChild = flex_mod.FlexChild;
+pub const ScrollView = @import("ScrollView.zig").ScrollView;
 
 // Focus management (Phase 4)
 pub const FocusManager = @import("FocusManager.zig").FocusManager;
