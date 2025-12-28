@@ -50,6 +50,12 @@ const border_mod = @import("Border.zig");
 pub const Border = border_mod.Border;
 pub const BoxStyle = border_mod.BoxStyle;
 
+// Container widgets (Phase 2)
+const flex_mod = @import("Flex.zig");
+pub const Flex = flex_mod.Flex;
+pub const FlexDirection = flex_mod.Direction;
+pub const FlexChild = flex_mod.FlexChild;
+
 // Focus management (Phase 4)
 pub const FocusManager = @import("FocusManager.zig").FocusManager;
 
