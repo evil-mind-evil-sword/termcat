@@ -144,6 +144,7 @@ pub fn blitBufferToBuffer(
     var src_buf = src;
     var temp_buf: Buffer = undefined;
     var has_temp = false;
+    var reverse_copy = false;
 
     if (buffersAlias(dest, src) and rectsOverlap(
         .{ .x = src_x, .y = src_y, .width = copy_w, .height = copy_h },
@@ -169,53 +170,123 @@ pub fn blitBufferToBuffer(
             src_x = 0;
             src_y = 0;
         } else |_| {
-            // Fall back to in-place copy if allocation fails.
+            // Temp buffer allocation failed. Use reverse-order copy as fallback.
+            // Check if we need to copy in reverse (dest starts after src in memory).
+            // Convert to linear indices for comparison: index = y * width + x
+            const src_start = @as(usize, src_y) * @as(usize, src.width) + @as(usize, src_x);
+            const dest_start = @as(usize, dest_y) * @as(usize, dest.width) + @as(usize, dest_x);
+
+            // If dest starts after src in the buffer, we need reverse copy to avoid corruption
+            if (dest_start > src_start) {
+                reverse_copy = true;
+            }
         }
     }
 
     // Perform the copy with wide character awareness
-    var dy: u16 = 0;
-    while (dy < copy_h) : (dy += 1) {
-        var dx: u16 = 0;
-        while (dx < copy_w) : (dx += 1) {
-            const cell = src_buf.getCell(src_x +| dx, src_y +| dy);
+    if (reverse_copy) {
+        // Copy in reverse order (from end to start) to avoid overwriting source data
+        // This handles the case where dest region starts after src region in memory
+        var dy: i32 = @as(i32, copy_h) - 1;
+        while (dy >= 0) : (dy -= 1) {
+            var dx: i32 = @as(i32, copy_w) - 1;
+            while (dx >= 0) : (dx -= 1) {
+                const dx_u = @as(u16, @intCast(dx));
+                const dy_u = @as(u16, @intCast(dy));
+                const cell = src_buf.getCell(src_x +| dx_u, src_y +| dy_u);
 
-            // Skip orphan continuation cells (start of source region cut a wide char)
-            if (cell.isContinuation()) {
-                // Check if the base char is outside our copy region
-                if (dx == 0) {
-                    // This is an orphan continuation at the start - skip it
+                // Skip all continuation cells during iteration
+                // In reverse, we encounter continuations before their base chars,
+                // so they will be copied when we process the base char
+                if (cell.isContinuation()) {
+                    // Check if the base char is outside our copy region (orphan at HIGH end)
+                    if (dx == @as(i32, copy_w) - 1) {
+                        // This is an orphan continuation at the end - replace with space
+                        dest.setCell(dest_x +| dx_u, dest_y +| dy_u, Cell{
+                            .char = ' ',
+                            .combining = .{ 0, 0 },
+                            .fg = cell.fg,
+                            .bg = cell.bg,
+                            .attrs = cell.attrs,
+                        });
+                    }
+                    // Otherwise skip (will be handled by its base char)
                     continue;
                 }
-                // Otherwise it's a valid continuation following a base char we copied
-            }
 
-            // Skip transparent cells if transparency is enabled
-            if (options.transparent and isTransparent(cell)) continue;
+                // Skip transparent cells if transparency is enabled
+                if (options.transparent and isTransparent(cell)) continue;
 
-            // Check if this is a wide character that needs its continuation
-            const is_wide = !cell.isContinuation() and isWideChar(src_buf, src_x +| dx, src_y +| dy);
+                // Check if this is a wide character that needs its continuation
+                const is_wide = !cell.isContinuation() and isWideChar(src_buf, src_x +| dx_u, src_y +| dy_u);
 
-            if (is_wide) {
-                // Check if there's room for both cells in the destination
-                if (dx + 1 >= copy_w) {
-                    // Wide char at right edge - replace with space to avoid orphan base
-                    dest.setCell(dest_x +| dx, dest_y +| dy, Cell{
-                        .char = ' ',
-                        .combining = .{ 0, 0 },
-                        .fg = cell.fg,
-                        .bg = cell.bg,
-                        .attrs = cell.attrs,
-                    });
+                if (is_wide) {
+                    // Check if there's room for both cells in the destination
+                    if (dx + 1 >= @as(i32, copy_w)) {
+                        // Wide char at right edge - replace with space to avoid orphan base
+                        dest.setCell(dest_x +| dx_u, dest_y +| dy_u, Cell{
+                            .char = ' ',
+                            .combining = .{ 0, 0 },
+                            .fg = cell.fg,
+                            .bg = cell.bg,
+                            .attrs = cell.attrs,
+                        });
+                    } else {
+                        // Copy both the base and continuation cells
+                        dest.setCell(dest_x +| dx_u, dest_y +| dy_u, cell);
+                        const cont = src_buf.getCell(src_x +| dx_u + 1, src_y +| dy_u);
+                        dest.setCell(dest_x +| dx_u + 1, dest_y +| dy_u, cont);
+                    }
                 } else {
-                    // Copy both the base and continuation cells
-                    dest.setCell(dest_x +| dx, dest_y +| dy, cell);
-                    const cont = src_buf.getCell(src_x +| dx + 1, src_y +| dy);
-                    dest.setCell(dest_x +| dx + 1, dest_y +| dy, cont);
-                    dx += 1; // Skip the continuation in the next iteration
+                    dest.setCell(dest_x +| dx_u, dest_y +| dy_u, cell);
                 }
-            } else {
-                dest.setCell(dest_x +| dx, dest_y +| dy, cell);
+            }
+        }
+    } else {
+        // Normal forward copy
+        var dy: u16 = 0;
+        while (dy < copy_h) : (dy += 1) {
+            var dx: u16 = 0;
+            while (dx < copy_w) : (dx += 1) {
+                const cell = src_buf.getCell(src_x +| dx, src_y +| dy);
+
+                // Skip orphan continuation cells (start of source region cut a wide char)
+                if (cell.isContinuation()) {
+                    // Check if the base char is outside our copy region
+                    if (dx == 0) {
+                        // This is an orphan continuation at the start - skip it
+                        continue;
+                    }
+                    // Otherwise it's a valid continuation following a base char we copied
+                }
+
+                // Skip transparent cells if transparency is enabled
+                if (options.transparent and isTransparent(cell)) continue;
+
+                // Check if this is a wide character that needs its continuation
+                const is_wide = !cell.isContinuation() and isWideChar(src_buf, src_x +| dx, src_y +| dy);
+
+                if (is_wide) {
+                    // Check if there's room for both cells in the destination
+                    if (dx + 1 >= copy_w) {
+                        // Wide char at right edge - replace with space to avoid orphan base
+                        dest.setCell(dest_x +| dx, dest_y +| dy, Cell{
+                            .char = ' ',
+                            .combining = .{ 0, 0 },
+                            .fg = cell.fg,
+                            .bg = cell.bg,
+                            .attrs = cell.attrs,
+                        });
+                    } else {
+                        // Copy both the base and continuation cells
+                        dest.setCell(dest_x +| dx, dest_y +| dy, cell);
+                        const cont = src_buf.getCell(src_x +| dx + 1, src_y +| dy);
+                        dest.setCell(dest_x +| dx + 1, dest_y +| dy, cont);
+                        dx += 1; // Skip the continuation in the next iteration
+                    }
+                } else {
+                    dest.setCell(dest_x +| dx, dest_y +| dy, cell);
+                }
             }
         }
     }
@@ -1060,4 +1131,189 @@ test "isWideChar helper" {
     try std.testing.expect(!isWideChar(&buf, 2, 0));
     // 'B' is not wide
     try std.testing.expect(!isWideChar(&buf, 3, 0));
+}
+
+test "blitBufferToBuffer overlapping forward shift (dest after src)" {
+    // This is the critical case: copying forward within the same buffer
+    // where dest region starts after src region (forward copy would corrupt)
+    const allocator = std.testing.allocator;
+
+    var buf = try Buffer.init(allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    // Initialize with distinct pattern so we can see if copying is correct
+    buf.print(0, 0, "ABCDEFGHIJ", .default, .default, .{});
+    // Buffer: A B C D E F G H I J (positions 0-9)
+
+    // Copy from [0-4] to [3-7] - forward shift by 3
+    // This would corrupt if done naively (A gets overwritten before being read)
+    blitBufferToBuffer(&buf, 3, 0, &buf, .{
+        .src_region = .{ .x = 0, .y = 0, .width = 5, .height = 1 },
+    });
+
+    // Expected result: A B C A B C D E I J
+    // The first 3 positions stay (source is protected by temp buffer)
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(0, 0).char);
+    try std.testing.expectEqual(@as(u21, 'B'), buf.getCell(1, 0).char);
+    try std.testing.expectEqual(@as(u21, 'C'), buf.getCell(2, 0).char);
+    // Destination positions 3-7 get the copy of A B C D E
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(3, 0).char);
+    try std.testing.expectEqual(@as(u21, 'B'), buf.getCell(4, 0).char);
+    try std.testing.expectEqual(@as(u21, 'C'), buf.getCell(5, 0).char);
+    try std.testing.expectEqual(@as(u21, 'D'), buf.getCell(6, 0).char);
+    try std.testing.expectEqual(@as(u21, 'E'), buf.getCell(7, 0).char);
+    // Positions 8-9 should be unchanged
+    try std.testing.expectEqual(@as(u21, 'I'), buf.getCell(8, 0).char);
+    try std.testing.expectEqual(@as(u21, 'J'), buf.getCell(9, 0).char);
+}
+
+test "blitBufferToBuffer overlapping backward shift (dest before src)" {
+    // When dest region starts before src region, forward copy is safe
+    const allocator = std.testing.allocator;
+
+    var buf = try Buffer.init(allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    buf.print(0, 0, "ABCDEFGHIJ", .default, .default, .{});
+
+    // Copy from [5-9] to [1-5] - backward shift by 4
+    // This is safe to do forward because we read ahead of writes
+    blitBufferToBuffer(&buf, 1, 0, &buf, .{
+        .src_region = .{ .x = 5, .y = 0, .width = 5, .height = 1 },
+    });
+
+    // Expected: A F G H I J G H I J
+    // Position 0 unchanged, positions 1-5 get F G H I J, 6-9 still have old content
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(0, 0).char);
+    try std.testing.expectEqual(@as(u21, 'F'), buf.getCell(1, 0).char);
+    try std.testing.expectEqual(@as(u21, 'G'), buf.getCell(2, 0).char);
+    try std.testing.expectEqual(@as(u21, 'H'), buf.getCell(3, 0).char);
+    try std.testing.expectEqual(@as(u21, 'I'), buf.getCell(4, 0).char);
+    try std.testing.expectEqual(@as(u21, 'J'), buf.getCell(5, 0).char);
+}
+
+test "blitBufferToBuffer overlapping with wide chars forward shift" {
+    // Verify wide character integrity when doing overlapping forward shifts
+    const allocator = std.testing.allocator;
+
+    var buf = try Buffer.init(allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    // Manually set cells to avoid print() complexity:
+    // Position: 0    1      2         3  4  5  6  7  8  9
+    // Content:  A    中     [cont]    B  C  D  E  F  G  H
+    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // 中
+    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // continuation
+    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+
+    // Copy from [0-4] to [3-7] - shifts by 3
+    // Source region copies: A, 中, [cont], B, C (5 cells)
+    blitBufferToBuffer(&buf, 3, 0, &buf, .{
+        .src_region = .{ .x = 0, .y = 0, .width = 5, .height = 1 },
+    });
+
+    // Expected after copy (using temp buffer protection):
+    // Position: 0    1      2         3  4      5         6  7  8  9
+    // Content:  A    中     [cont]    A  中     [cont]    B  C  G  H
+
+    // First three cells should be unchanged
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(0, 0).char);
+    try std.testing.expectEqual(@as(u21, 0x4E2D), buf.getCell(1, 0).char); // 中
+    try std.testing.expect(buf.getCell(2, 0).isContinuation());
+
+    // At position 3-5 we should have the copied A, 中, and its continuation
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(3, 0).char);
+    try std.testing.expectEqual(@as(u21, 0x4E2D), buf.getCell(4, 0).char);
+    try std.testing.expect(buf.getCell(5, 0).isContinuation());
+
+    // Position 6-7 should have B and C
+    try std.testing.expectEqual(@as(u21, 'B'), buf.getCell(6, 0).char);
+    try std.testing.expectEqual(@as(u21, 'C'), buf.getCell(7, 0).char);
+
+    // Positions 8-9 unchanged
+    try std.testing.expectEqual(@as(u21, 'G'), buf.getCell(8, 0).char);
+    try std.testing.expectEqual(@as(u21, 'H'), buf.getCell(9, 0).char);
+}
+
+test "blitBufferToBuffer overlapping multi-row forward shift" {
+    // Test overlapping with multiple rows
+    const allocator = std.testing.allocator;
+
+    var buf = try Buffer.init(allocator, .{ .width = 5, .height = 4 });
+    defer buf.deinit();
+
+    // Fill with distinct pattern to verify correct copying
+    buf.print(0, 0, "AAAAA", .default, .default, .{});
+    buf.print(0, 1, "BBBBB", .default, .default, .{});
+    buf.print(0, 2, "CCCCC", .default, .default, .{});
+    buf.print(0, 3, "DDDDD", .default, .default, .{});
+
+    // Copy from rows 0-1, cols 0-4 to rows 1-2, cols 0-4 (vertical shift)
+    // This overlaps: source row 1 (BBBBB) is same as dest row 1
+    blitBufferToBuffer(&buf, 0, 1, &buf, .{
+        .src_region = .{ .x = 0, .y = 0, .width = 5, .height = 2 },
+    });
+
+    // Expected:
+    // Row 0: AAAAA (unchanged)
+    // Row 1: AAAAA (copied from src row 0)
+    // Row 2: BBBBB (copied from src row 1)
+    // Row 3: DDDDD (unchanged)
+
+    for (0..5) |x| {
+        try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(@intCast(x), 0).char);
+        try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(@intCast(x), 1).char);
+        try std.testing.expectEqual(@as(u21, 'B'), buf.getCell(@intCast(x), 2).char);
+        try std.testing.expectEqual(@as(u21, 'D'), buf.getCell(@intCast(x), 3).char);
+    }
+}
+
+test "blitBufferToBuffer reverse copy fallback for wide chars" {
+    // Test reverse-order copying with wide characters
+    // This verifies the fallback mechanism works correctly
+    const allocator = std.testing.allocator;
+
+    var buf = try Buffer.init(allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    // Set up buffer with wide character
+    // Position: 0    1      2         3  4  5  6  7  8  9
+    // Content:  A    中     [cont]    B  C  D  E  F  G  H
+    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+
+    // Forward shift by 2 (overlapping, would corrupt without reverse copy or temp buffer)
+    blitBufferToBuffer(&buf, 2, 0, &buf, .{
+        .src_region = .{ .x = 0, .y = 0, .width = 5, .height = 1 },
+    });
+
+    // Expected after safe copy:
+    // Position: 0    1      2      3  4         5      6  7  8  9
+    // Content:  A    中     A      中  [cont]    B      C  F  G  H
+
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(0, 0).char);
+    try std.testing.expectEqual(@as(u21, 0x4E2D), buf.getCell(1, 0).char);
+    try std.testing.expectEqual(@as(u21, 'A'), buf.getCell(2, 0).char);
+    try std.testing.expectEqual(@as(u21, 0x4E2D), buf.getCell(3, 0).char);
+    try std.testing.expect(buf.getCell(4, 0).isContinuation());
+    try std.testing.expectEqual(@as(u21, 'B'), buf.getCell(5, 0).char);
+    try std.testing.expectEqual(@as(u21, 'C'), buf.getCell(6, 0).char);
+    try std.testing.expectEqual(@as(u21, 'F'), buf.getCell(7, 0).char);
+    try std.testing.expectEqual(@as(u21, 'G'), buf.getCell(8, 0).char);
+    try std.testing.expectEqual(@as(u21, 'H'), buf.getCell(9, 0).char);
 }
