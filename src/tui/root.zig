@@ -31,6 +31,13 @@ pub const IdStack = id_mod.IdStack;
 // State management (Phase 1)
 pub const StateStore = @import("State.zig").StateStore;
 
+// Layout constraints (Phase 1)
+const constraint_mod = @import("Constraint.zig");
+pub const Constraint = constraint_mod.Constraint;
+pub const resolveConstraints = constraint_mod.resolve;
+pub const resolveConstraintsWithAllocator = constraint_mod.resolveWithAllocator;
+pub const freeConstraintSizes = constraint_mod.freeSizes;
+
 // Basic widgets (Phase 2)
 pub const Label = @import("Label.zig").Label;
 pub const Button = @import("Button.zig").Button;
