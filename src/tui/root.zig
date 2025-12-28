@@ -31,8 +31,8 @@ pub const IdStack = id_mod.IdStack;
 // State management (Phase 1)
 pub const StateStore = @import("State.zig").StateStore;
 
-// Focus management (to be implemented)
-// pub const Focus = @import("Focus.zig");
+// Focus management (Phase 4)
+pub const FocusManager = @import("FocusManager.zig").FocusManager;
 
 // MVU runtime (Phase 3)
 // pub const App = @import("App.zig");
