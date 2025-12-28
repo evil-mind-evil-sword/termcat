@@ -10,9 +10,19 @@ A fast and portable terminal library inspired by [termbox2](https://github.com/t
 
 ## Why?
 
-- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output for high performance.
+- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output.
 - **Cross-Platform**: Consistent behavior and API across Linux, macOS, BSD, and Windows systems.
-- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks out of the box.
+- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks.
+
+## Install
+
+Add to your `build.zig.zon`:
+```zig
+.termcat = .{
+    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v0.1.0.tar.gz",
+    .hash = "...",
+},
+```
 
 ## Features
 
@@ -28,29 +38,6 @@ A fast and portable terminal library inspired by [termbox2](https://github.com/t
 
 - POSIX (Linux, macOS, BSD)
 - Windows 10+ (Console API with VT sequences)
-
-## Installation
-
-Add termcat as a dependency in your `build.zig.zon`:
-
-```zig
-.dependencies = .{
-    .termcat = .{
-        .url = "https://github.com/femtomc/termcat/archive/refs/tags/v0.1.0.tar.gz",
-        .hash = "...",
-    },
-},
-```
-
-Then in your `build.zig`:
-
-```zig
-const termcat = b.dependency("termcat", .{
-    .target = target,
-    .optimize = optimize,
-});
-exe.root_module.addImport("termcat", termcat.module("termcat"));
-```
 
 ## Quick Start
 
