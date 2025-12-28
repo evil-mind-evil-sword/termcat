@@ -45,12 +45,9 @@ pub const IdStack = struct {
     current: Id = Id.root,
 
     /// Push a local identifier onto the stack
-    pub fn push(self: *IdStack, local: anytype) void {
-        self.stack.append(self.current.hash) catch {
-            // Stack overflow - this shouldn't happen in normal use
-            // Just continue with current id
-            return;
-        };
+    /// Returns error.Overflow if the stack is full (max 64 levels deep)
+    pub fn push(self: *IdStack, local: anytype) error{Overflow}!void {
+        try self.stack.append(self.current.hash);
         self.current = Id.child(self.current, local);
     }
 
@@ -67,8 +64,8 @@ pub const IdStack = struct {
     }
 
     /// Push, execute a function, then pop (for defer-style usage)
-    pub fn withId(self: *IdStack, local: anytype, func: anytype) void {
-        self.push(local);
+    pub fn withId(self: *IdStack, local: anytype, func: anytype) error{Overflow}!void {
+        try self.push(local);
         defer self.pop();
         func();
     }
@@ -165,11 +162,11 @@ test "IdStack basic" {
 
     try std.testing.expect(stack.getId().eql(Id.root));
 
-    stack.push("panel");
+    try stack.push("panel");
     const panel_id = stack.getId();
     try std.testing.expect(!panel_id.eql(Id.root));
 
-    stack.push("button");
+    try stack.push("button");
     const button_id = stack.getId();
     try std.testing.expect(!button_id.eql(panel_id));
 
@@ -185,11 +182,11 @@ test "IdStack consistency" {
     var stack2 = IdStack{};
 
     // Same sequence should produce same ids
-    stack1.push("list");
-    stack1.push(@as(usize, 5));
+    try stack1.push("list");
+    try stack1.push(@as(usize, 5));
 
-    stack2.push("list");
-    stack2.push(@as(usize, 5));
+    try stack2.push("list");
+    try stack2.push(@as(usize, 5));
 
     try std.testing.expect(stack1.getId().eql(stack2.getId()));
 }

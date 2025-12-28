@@ -115,6 +115,47 @@ pub const PlaneView = struct {
         }
     }
 
+    /// Print a UTF-8 string with full styling at relative coordinates (clipped per character)
+    /// Handles wide characters correctly.
+    pub fn print(
+        self: *PlaneView,
+        x: i32,
+        y: i32,
+        str: []const u8,
+        fg: Cell.Color,
+        bg: Cell.Color,
+        attrs: Cell.Attributes,
+    ) void {
+        const unicode = @import("../unicode/width.zig");
+        var col = x;
+        var iter = std.unicode.Utf8View.initUnchecked(str).iterator();
+        while (iter.nextCodepoint()) |cp| {
+            const char_width = unicode.codePointWidth(cp);
+            if (char_width == 0) continue;
+
+            if (self.isInBounds(col, y)) {
+                self.setCell(col, y, Cell{
+                    .char = cp,
+                    .combining = .{ 0, 0 },
+                    .fg = fg,
+                    .bg = bg,
+                    .attrs = attrs,
+                });
+                // For wide characters, set continuation cell
+                if (char_width == 2 and self.isInBounds(col + 1, y)) {
+                    self.setCell(col + 1, y, Cell{
+                        .char = Cell.WIDE_CONTINUATION,
+                        .combining = .{ 0, 0 },
+                        .fg = fg,
+                        .bg = bg,
+                        .attrs = attrs,
+                    });
+                }
+            }
+            col += @intCast(char_width);
+        }
+    }
+
     /// Fill the entire view with a cell
     pub fn fill(self: *PlaneView, cell: Cell) void {
         var y: i32 = 0;

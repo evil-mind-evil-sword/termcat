@@ -44,17 +44,18 @@ pub const StateStore = struct {
     ///
     /// If state doesn't exist, creates with default initialization.
     /// Marks state as used for this frame (prevents GC).
-    pub fn get(self: *StateStore, comptime T: type, id: Id) *T {
+    pub fn get(self: *StateStore, comptime T: type, id: Id) !*T {
         if (self.states.getPtr(id.hash)) |entry| {
             entry.used_this_frame = true;
             return @ptrCast(@alignCast(entry.ptr));
         }
 
         // Create new state with default initialization
-        const state = self.allocator.create(T) catch @panic("StateStore allocation failed");
+        const state = try self.allocator.create(T);
+        errdefer self.allocator.destroy(state);
         state.* = T{};
 
-        self.states.put(id.hash, .{
+        try self.states.put(id.hash, .{
             .ptr = state,
             .deinit_fn = struct {
                 fn deinit(ptr: *anyopaque, alloc: std.mem.Allocator) void {
@@ -63,7 +64,7 @@ pub const StateStore = struct {
                 }
             }.deinit,
             .used_this_frame = true,
-        }) catch @panic("StateStore put failed");
+        });
 
         return state;
     }
@@ -135,14 +136,14 @@ test "StateStore basic get" {
     defer store.deinit();
 
     const id = Id.child(Id.root, "widget1");
-    const state = store.get(TestState, id);
+    const state = try store.get(TestState, id);
 
     try std.testing.expectEqual(@as(u32, 0), state.value);
 
     state.value = 42;
 
     // Getting again should return same state
-    const state2 = store.get(TestState, id);
+    const state2 = try store.get(TestState, id);
     try std.testing.expectEqual(@as(u32, 42), state2.value);
 }
 
@@ -157,14 +158,14 @@ test "StateStore different ids" {
     const id1 = Id.child(Id.root, "widget1");
     const id2 = Id.child(Id.root, "widget2");
 
-    const state1 = store.get(TestState, id1);
-    const state2 = store.get(TestState, id2);
+    const state1 = try store.get(TestState, id1);
+    const state2 = try store.get(TestState, id2);
 
     state1.value = 1;
     state2.value = 2;
 
-    try std.testing.expectEqual(@as(u32, 1), store.get(TestState, id1).value);
-    try std.testing.expectEqual(@as(u32, 2), store.get(TestState, id2).value);
+    try std.testing.expectEqual(@as(u32, 1), (try store.get(TestState, id1)).value);
+    try std.testing.expectEqual(@as(u32, 2), (try store.get(TestState, id2)).value);
 }
 
 test "StateStore getExisting" {
@@ -181,7 +182,7 @@ test "StateStore getExisting" {
     try std.testing.expect(store.getExisting(TestState, id) == null);
 
     // Create state
-    _ = store.get(TestState, id);
+    _ = try store.get(TestState, id);
 
     // Now should return the state
     try std.testing.expect(store.getExisting(TestState, id) != null);
@@ -200,15 +201,15 @@ test "StateStore frame lifecycle" {
 
     // Frame 1: create both states
     store.beginFrame();
-    _ = store.get(TestState, id1);
-    _ = store.get(TestState, id2);
+    _ = try store.get(TestState, id1);
+    _ = try store.get(TestState, id2);
     store.endFrame();
 
     try std.testing.expectEqual(@as(usize, 2), store.count());
 
     // Frame 2: only use id1
     store.beginFrame();
-    _ = store.get(TestState, id1);
+    _ = try store.get(TestState, id1);
     // Don't access id2
     store.endFrame();
 
@@ -227,7 +228,7 @@ test "StateStore remove" {
     defer store.deinit();
 
     const id = Id.child(Id.root, "widget");
-    _ = store.get(TestState, id);
+    _ = try store.get(TestState, id);
 
     try std.testing.expect(store.contains(id));
 

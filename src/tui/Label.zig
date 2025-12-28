@@ -8,13 +8,19 @@ const Widget = @import("Widget.zig");
 const PlaneView = @import("PlaneView.zig").PlaneView;
 const Theme = @import("Theme.zig").Theme;
 const Style = @import("Theme.zig").Style;
-const Layout = @import("../Layout.zig");
 const unicode = @import("../unicode/width.zig");
+
+/// Text alignment options
+pub const Alignment = enum {
+    left,
+    center,
+    right,
+};
 
 /// Label widget for displaying text
 pub const Label = struct {
     text: []const u8,
-    alignment: Layout.Alignment = .left,
+    alignment: Alignment = .left,
     style: Style = .{},
     widget_state: Widget.WidgetState = .{},
 
@@ -29,7 +35,7 @@ pub const Label = struct {
     }
 
     /// Set the text alignment
-    pub fn withAlignment(self: *Label, alignment: Layout.Alignment) *Label {
+    pub fn withAlignment(self: *Label, alignment: Alignment) *Label {
         self.alignment = alignment;
         return self;
     }
@@ -77,23 +83,18 @@ pub const Label = struct {
         const text_width: u16 = @intCast(@min(unicode.stringWidth(self.text), std.math.maxInt(u16)));
 
         // Calculate starting x position based on alignment
-        const offset: u16 = switch (self.alignment) {
+        const offset: i32 = switch (self.alignment) {
             .left => 0,
-            .center => (view_size.width -| text_width) / 2,
-            .right => view_size.width -| text_width,
+            .center => @intCast((view_size.width -| text_width) / 2),
+            .right => @intCast(view_size.width -| text_width),
         };
 
-        // Write the text to the view at the calculated position using layout
-        // Note: We use the underlying plane's buffer and layout functions directly
-        // to get full style support (including background and attributes)
-        const abs_x: u16 = @intCast(@as(i32, @intCast(view.origin.x)) +| @as(i32, @intCast(offset)));
-        _ = Layout.printAligned(
-            &view.plane.buffer,
-            abs_x,
-            view.origin.y,
-            view_size.width -| offset,
+        // Write the text to the view at the calculated position
+        // PlaneView.print handles clipping automatically
+        view.print(
+            offset,
+            0,
             self.text,
-            .left, // We already calculated the offset, so use left alignment on the buffer
             final_style.fg,
             final_style.bg,
             final_style.attrs,
@@ -123,14 +124,15 @@ const Plane = @import("../Plane.zig");
 test "Label init with default alignment" {
     const label = Label.init("Hello");
     try std.testing.expectEqualStrings("Hello", label.text);
-    try std.testing.expectEqual(Layout.Alignment.left, label.alignment);
+    try std.testing.expectEqual(Alignment.left, label.alignment);
     try std.testing.expect(!label.widget_state.disabled);
     try std.testing.expect(!label.widget_state.focused);
 }
 
 test "Label measure basic text" {
     var label = Label.init("Hello");
-    const measured = label.measure({}, Widget.SizeConstraint{});
+    const widget = Widget.Widget.init(Label, &label);
+    const measured = widget.measure(Widget.SizeConstraint{});
 
     try std.testing.expectEqual(@as(u16, 5), measured.width);
     try std.testing.expectEqual(@as(u16, 1), measured.height);
@@ -138,7 +140,8 @@ test "Label measure basic text" {
 
 test "Label measure empty text" {
     var label = Label.init("");
-    const measured = label.measure({}, Widget.SizeConstraint{});
+    const widget = Widget.Widget.init(Label, &label);
+    const measured = widget.measure(Widget.SizeConstraint{});
 
     try std.testing.expectEqual(@as(u16, 0), measured.width);
     try std.testing.expectEqual(@as(u16, 1), measured.height);
@@ -146,8 +149,9 @@ test "Label measure empty text" {
 
 test "Label measure respects constraint" {
     var label = Label.init("Hello World");
+    const widget = Widget.Widget.init(Label, &label);
     const constraint = Widget.SizeConstraint.atMost(5, 1);
-    const measured = label.measure({}, constraint);
+    const measured = widget.measure(constraint);
 
     try std.testing.expectEqual(@as(u16, 5), measured.width);
     try std.testing.expectEqual(@as(u16, 1), measured.height);
@@ -155,7 +159,8 @@ test "Label measure respects constraint" {
 
 test "Label measure with wide characters" {
     var label = Label.init("中文");
-    const measured = label.measure({}, Widget.SizeConstraint{});
+    const widget = Widget.Widget.init(Label, &label);
+    const measured = widget.measure(Widget.SizeConstraint{});
 
     // "中文" = 2 + 2 = 4 display width
     try std.testing.expectEqual(@as(u16, 4), measured.width);
@@ -170,8 +175,9 @@ test "Label render left aligned" {
     var view = PlaneView.init(root);
     var label = Label.init("Hi");
     label.alignment = .left;
+    const widget = Widget.Widget.init(Label, &label);
 
-    label.render(&view);
+    widget.render(&view);
 
     try std.testing.expectEqual(@as(u21, 'H'), view.getCell(0, 0).?.char);
     try std.testing.expectEqual(@as(u21, 'i'), view.getCell(1, 0).?.char);
@@ -185,8 +191,9 @@ test "Label render center aligned" {
     var view = PlaneView.init(root);
     var label = Label.init("Hi");
     label.alignment = .center;
+    const widget = Widget.Widget.init(Label, &label);
 
-    label.render(&view);
+    widget.render(&view);
 
     // With 20 width and 2 char text, should be centered at position 9
     try std.testing.expectEqual(@as(u21, 'H'), view.getCell(9, 0).?.char);
@@ -201,8 +208,9 @@ test "Label render right aligned" {
     var view = PlaneView.init(root);
     var label = Label.init("Hi");
     label.alignment = .right;
+    const widget = Widget.Widget.init(Label, &label);
 
-    label.render(&view);
+    widget.render(&view);
 
     // With 20 width and 2 char text, should be at right edge (positions 18-19)
     try std.testing.expectEqual(@as(u21, 'H'), view.getCell(18, 0).?.char);
@@ -217,8 +225,9 @@ test "Label render with disabled state" {
     var view = PlaneView.init(root);
     var label = Label.init("Text");
     label.widget_state.disabled = true;
+    const widget = Widget.Widget.init(Label, &label);
 
-    label.render(&view);
+    widget.render(&view);
 
     // Should still render the text (disabled state is visual only)
     try std.testing.expectEqual(@as(u21, 'T'), view.getCell(0, 0).?.char);
@@ -227,14 +236,16 @@ test "Label render with disabled state" {
 
 test "Label as Widget" {
     var label = Label.init("Test");
-    const widget = Widget.init(Label, &label);
+    const widget = Widget.Widget.init(Label, &label);
 
     const measured = widget.measure(Widget.SizeConstraint{});
     try std.testing.expectEqual(@as(u16, 4), measured.width);
     try std.testing.expectEqual(@as(u16, 1), measured.height);
 
-    // Events should be ignored
-    const result = widget.handleEvent(undefined);
+    // Events should be ignored - use a valid event
+    const Event = @import("../Event.zig");
+    const key_event = Event.Event{ .key = Event.Key.fromCodepoint('a', Event.Modifiers.none) };
+    const result = widget.handleEvent(key_event);
     try std.testing.expectEqual(Widget.EventResult.ignored, result);
 }
 
@@ -242,6 +253,6 @@ test "Label builder pattern" {
     var label = Label.init("Hello");
     _ = label.withAlignment(.center).withState(.{ .disabled = true });
 
-    try std.testing.expectEqual(Layout.Alignment.center, label.alignment);
+    try std.testing.expectEqual(Alignment.center, label.alignment);
     try std.testing.expect(label.widget_state.disabled);
 }
