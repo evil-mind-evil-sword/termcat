@@ -4,7 +4,15 @@
   <img src="logo.png" alt="termcat logo" width="400">
 </p>
 
-A fast and portable cell-based terminal I/O library. Inspired by and borrowing great ideas from [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses).
+**Cell-based terminal I/O.** Diff rendering, cross-platform, Unicode-aware.
+
+A fast and portable terminal library inspired by [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses).
+
+## Why?
+
+- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output for high performance.
+- **Cross-Platform**: Consistent behavior and API across Linux, macOS, BSD, and Windows systems.
+- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks out of the box.
 
 ## Features
 
