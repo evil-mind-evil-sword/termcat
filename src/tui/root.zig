@@ -31,6 +31,10 @@ pub const IdStack = id_mod.IdStack;
 // State management (Phase 1)
 pub const StateStore = @import("State.zig").StateStore;
 
+// Basic widgets (Phase 2)
+pub const Label = @import("Label.zig").Label;
+pub const Button = @import("Button.zig").Button;
+
 // Focus management (Phase 4)
 pub const FocusManager = @import("FocusManager.zig").FocusManager;
 
