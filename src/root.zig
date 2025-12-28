@@ -7,6 +7,10 @@
 //! - Bracketed paste support
 //! - Color and attribute handling
 //! - Diff-based rendering
+//!
+//! Module boundary:
+//! - termcat: Core terminal I/O and low-level primitives
+//! - termcat.tui: Higher-level TUI framework (widgets, styling, MVU runtime)
 
 const std = @import("std");
 
@@ -87,6 +91,9 @@ pub const backend = struct {
     else
         posix.InitOptions;
 };
+
+// TUI framework layer
+pub const tui = @import("tui/root.zig");
 
 // Convenience re-exports for backend types
 pub const PosixBackend = backend.PosixBackend;
