@@ -74,6 +74,31 @@ pub fn blitBufferToPlane(
 ) void {
     const dest_buf = dest.getBuffer();
     blitBufferToBuffer(dest_buf, dest_x, dest_y, src, options);
+
+    // Mark the affected region as dirty
+    const src_rect = options.src_region orelse Rect{
+        .x = 0,
+        .y = 0,
+        .width = src.width,
+        .height = src.height,
+    };
+
+    // Step 1: Clip to source bounds
+    const src_w = @min(src_rect.width, src.width -| src_rect.x);
+    const src_h = @min(src_rect.height, src.height -| src_rect.y);
+
+    // Step 2: Clip to destination bounds
+    const copy_w = @min(src_w, dest.width -| dest_x);
+    const copy_h = @min(src_h, dest.height -| dest_y);
+
+    if (copy_w > 0 and copy_h > 0) {
+        dest.markDirtyRect(.{
+            .x = dest_x,
+            .y = dest_y,
+            .width = copy_w,
+            .height = copy_h,
+        });
+    }
 }
 
 /// Copy cells from a source plane to a destination plane.
@@ -95,6 +120,31 @@ pub fn blitPlaneToPlane(
 ) void {
     const dest_buf = dest.getBuffer();
     blitBufferToBuffer(dest_buf, dest_x, dest_y, &src.buffer, options);
+
+    // Mark the affected region as dirty
+    const src_rect = options.src_region orelse Rect{
+        .x = 0,
+        .y = 0,
+        .width = src.width,
+        .height = src.height,
+    };
+
+    // Step 1: Clip to source bounds
+    const src_w = @min(src_rect.width, src.width -| src_rect.x);
+    const src_h = @min(src_rect.height, src.height -| src_rect.y);
+
+    // Step 2: Clip to destination bounds
+    const copy_w = @min(src_w, dest.width -| dest_x);
+    const copy_h = @min(src_h, dest.height -| dest_y);
+
+    if (copy_w > 0 and copy_h > 0) {
+        dest.markDirtyRect(.{
+            .x = dest_x,
+            .y = dest_y,
+            .width = copy_w,
+            .height = copy_h,
+        });
+    }
 }
 
 /// Copy cells from a source buffer to a destination buffer.
@@ -420,6 +470,24 @@ pub fn tileBufferToPlane(
 ) void {
     const dest_buf = dest.getBuffer();
     tileBufferToBuffer(dest_buf, dest_rect, tile, options);
+
+    // Mark the affected region as dirty
+    // Clip to plane bounds (same logic as tileBufferToBuffer)
+    const dx_start = dest_rect.x;
+    const dy_start = dest_rect.y;
+    const rect_end_x = @min(dest_rect.x, std.math.maxInt(u16) - dest_rect.width) + dest_rect.width;
+    const rect_end_y = @min(dest_rect.y, std.math.maxInt(u16) - dest_rect.height) + dest_rect.height;
+    const dx_end = @min(rect_end_x, dest.width);
+    const dy_end = @min(rect_end_y, dest.height);
+
+    if (dx_start < dest.width and dy_start < dest.height and dx_end > dx_start and dy_end > dy_start) {
+        dest.markDirtyRect(.{
+            .x = dx_start,
+            .y = dy_start,
+            .width = dx_end - dx_start,
+            .height = dy_end - dy_start,
+        });
+    }
 }
 
 /// Sprite: a cell buffer that can be blitted with transparency.
