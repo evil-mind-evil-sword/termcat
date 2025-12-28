@@ -5,3 +5,8 @@ zig-cache/
 
 # OS
 .DS_Store
+
+# Dev state (now in monorepo)
+.claude/
+.tissue/
+.zawinski/
