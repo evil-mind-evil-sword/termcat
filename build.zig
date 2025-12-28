@@ -150,6 +150,9 @@ pub fn build(b: *std.Build) void {
         .{ .name = "color_grid", .path = "examples/color_grid.zig" },
         .{ .name = "demo", .path = "examples/demo.zig" },
         .{ .name = "graphics_demo", .path = "examples/graphics_demo.zig" },
+        .{ .name = "kanban", .path = "examples/kanban.zig" },
+        .{ .name = "settings", .path = "examples/settings.zig" },
+        .{ .name = "log_viewer", .path = "examples/log_viewer.zig" },
     };
 
     for (examples) |example| {
