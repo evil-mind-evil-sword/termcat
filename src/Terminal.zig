@@ -211,6 +211,7 @@ pub fn createPlane(self: *Terminal, x: i32, y: i32, dimensions: Size) !*Plane {
 pub fn invalidatePlane(self: *Terminal, plane: *const Plane) !void {
     try self.compositor.invalidatePlane(plane);
     self.dirty = true;
+    self.maybeAutoPresent();
 }
 
 /// Invalidate a plane after moving it.
@@ -218,6 +219,7 @@ pub fn invalidatePlane(self: *Terminal, plane: *const Plane) !void {
 pub fn invalidatePlaneMove(self: *Terminal, plane: *const Plane, old_x: i32, old_y: i32) !void {
     try self.compositor.invalidatePlaneMove(plane, old_x, old_y);
     self.dirty = true;
+    self.maybeAutoPresent();
 }
 
 // ============================================================================
