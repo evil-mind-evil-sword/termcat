@@ -10,8 +10,20 @@
 pub const PlaneView = @import("PlaneView.zig").PlaneView;
 
 // Widget system (Phase 1)
-// pub const Widget = @import("Widget.zig");
-// pub const Theme = @import("Theme.zig");
+const widget_mod = @import("Widget.zig");
+pub const Widget = widget_mod.Widget;
+pub const VTable = widget_mod.VTable;
+pub const SizeConstraint = widget_mod.SizeConstraint;
+pub const MeasuredSize = widget_mod.MeasuredSize;
+pub const WidgetState = widget_mod.WidgetState;
+pub const EventResult = widget_mod.EventResult;
+pub const isWidget = widget_mod.isWidget;
+
+const theme_mod = @import("Theme.zig");
+pub const Theme = theme_mod.Theme;
+pub const Style = theme_mod.Style;
+
+// Focus management (to be implemented)
 // pub const Focus = @import("Focus.zig");
 // pub const State = @import("State.zig");
 
