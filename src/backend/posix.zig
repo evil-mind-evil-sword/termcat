@@ -6,6 +6,7 @@ const PixelSize = Event.PixelSize;
 const CellPixelSize = Event.CellPixelSize;
 const Input = @import("../input/Input.zig");
 const Cell = @import("../Cell.zig");
+const signal = @import("../signal.zig");
 
 /// Color depth capability levels (re-exported from Cell.zig)
 pub const ColorDepth = Cell.ColorDepth;
@@ -267,6 +268,10 @@ pub const PosixBackend = struct {
         // we need to clean up the terminal state
         errdefer self.forceCleanup();
 
+        // Install crash-safe signal handler for terminal restore
+        signal.install(self.tty_fd, self.orig_termios);
+        errdefer signal.uninstall();
+
         // Install signal handler if requested
         if (options.install_sigwinch) {
             self.installSigwinchHandler();
@@ -292,6 +297,9 @@ pub const PosixBackend = struct {
 
     /// Clean up and restore terminal state
     pub fn deinit(self: *Self) void {
+        // Uninstall crash-safe signal handler
+        signal.uninstall();
+
         // Restore signal handler if we installed one
         if (self.options.install_sigwinch) {
             self.restoreSigwinchHandler();

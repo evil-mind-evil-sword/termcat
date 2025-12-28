@@ -72,6 +72,7 @@ pub const backend = struct {
     pub const PosixBackend = posix.PosixBackend;
     pub const WindowsBackend = windows.WindowsBackend;
     pub const Pty = pty.Pty;
+    pub const signal = @import("signal.zig");
 
     /// Platform-specific backend
     pub const Backend = if (@import("builtin").os.tag == .windows)
