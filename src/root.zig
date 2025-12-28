@@ -65,12 +65,14 @@ pub const backend = struct {
     pub const posix = @import("backend/posix.zig");
     pub const windows = @import("backend/windows.zig");
     pub const pty = @import("backend/pty.zig");
+    pub const headless = @import("backend/headless.zig");
     pub const posix_test = @import("backend/posix_test.zig");
     pub const integration_test = @import("backend/integration_test.zig");
     pub const compositor_test = @import("backend/compositor_test.zig");
 
     pub const PosixBackend = posix.PosixBackend;
     pub const WindowsBackend = windows.WindowsBackend;
+    pub const HeadlessBackend = headless.HeadlessBackend;
     pub const Pty = pty.Pty;
     pub const signal = @import("signal.zig");
 
@@ -99,6 +101,7 @@ pub const tui = @import("tui/root.zig");
 // Convenience re-exports for backend types
 pub const PosixBackend = backend.PosixBackend;
 pub const WindowsBackend = backend.WindowsBackend;
+pub const HeadlessBackend = backend.HeadlessBackend;
 pub const Backend = backend.Backend;
 pub const Pty = backend.Pty;
 pub const Input = input.Input;
