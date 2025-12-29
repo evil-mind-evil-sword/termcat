@@ -337,7 +337,10 @@ fn printWrapCharWithPos(
         lines_used = row + 1;
     }
 
-    const final_rows = if (lines_used > 0) lines_used else 1;
+    // If we ended on a new row (e.g., after trailing newline), include it.
+    // This ensures rows_used reflects the cursor position, not just content rows.
+    // But don't exceed max_height.
+    const final_rows = @min(@max(if (lines_used > 0) lines_used else 1, row + 1), max_height);
     return .{ .rows_used = final_rows, .final_col = col };
 }
 
@@ -426,7 +429,10 @@ fn printWrapWord(
         }
     }
 
-    return if (lines_used > 0) lines_used else 1;
+    // If we ended on a new row (e.g., after trailing newline), include it.
+    // This ensures the return value reflects the cursor position, not just content rows.
+    // But don't exceed max_height.
+    return @min(@max(if (lines_used > 0) lines_used else 1, row + 1), max_height);
 }
 
 /// Find the next word (sequence of non-space characters)

@@ -484,15 +484,27 @@ pub fn getCell(self: *const Plane, x: u16, y: u16) Cell {
 /// Print text at plane-local coordinates.
 /// Automatically marks the printed region as dirty.
 pub fn print(self: *Plane, x: u16, y: u16, str: []const u8, fg: Color, bg: Color, attrs: Attributes) void {
-    const unicode = @import("unicode/width.zig");
-    self.buffer.print(x, y, str, fg, bg, attrs);
-    // Calculate the width of the printed text
-    const text_width = unicode.stringWidth(str);
-    // Clip to plane bounds
-    const actual_width: u16 = @intCast(@min(text_width, self.width -| x));
+    // Use printLen to get the actual width of printed text.
+    // This ensures dirty tracking matches the decoding used by Buffer.print,
+    // handling invalid UTF-8 consistently.
+    const actual_width = self.buffer.printLen(x, y, str, fg, bg, attrs);
     if (actual_width > 0 and y < self.height) {
         self.markDirtyRect(.{ .x = x, .y = y, .width = actual_width, .height = 1 });
     }
+}
+
+/// Print text at plane-local coordinates and return the width consumed.
+/// Automatically marks the printed region as dirty.
+/// Returns the number of cells consumed (display width).
+pub fn printLen(self: *Plane, x: u16, y: u16, str: []const u8, fg: Color, bg: Color, attrs: Attributes) u16 {
+    // Use printLen to get the actual width of printed text.
+    // This ensures dirty tracking matches the decoding used by Buffer.print,
+    // handling invalid UTF-8 consistently.
+    const actual_width = self.buffer.printLen(x, y, str, fg, bg, attrs);
+    if (actual_width > 0 and y < self.height) {
+        self.markDirtyRect(.{ .x = x, .y = y, .width = actual_width, .height = 1 });
+    }
+    return actual_width;
 }
 
 /// Clear the plane's buffer.

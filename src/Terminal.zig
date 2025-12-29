@@ -165,10 +165,11 @@ pub fn draw(
     bg: Color,
     attrs: Attributes,
 ) void {
-    self.root.print(x, y, text, fg, bg, attrs);
-    // Use proper Unicode width calculation for dirty region
-    const cell_width = unicode.stringWidth(text);
-    self.markDirtyRect(.{ .x = x, .y = y, .width = @intCast(@min(cell_width, std.math.maxInt(u16))), .height = 1 });
+    // Plane.printLen returns the actual display width, handling invalid UTF-8 consistently.
+    const cell_width = self.root.printLen(x, y, text, fg, bg, attrs);
+    if (cell_width > 0) {
+        self.markDirtyRect(.{ .x = x, .y = y, .width = cell_width, .height = 1 });
+    }
 }
 
 /// Set a single cell on the root plane.

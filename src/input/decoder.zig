@@ -796,9 +796,13 @@ fn growPasteBuffer(self: *Decoder) !void {
     if (new_len <= current_len) {
         return error.PasteBufferFull;
     }
-    const new_buf = try self.allocator.realloc(self.paste_buf, new_len);
+    // If paste_allocated is false (initial alloc failed in startPaste), we need to
+    // use alloc instead of realloc since paste_buf is not owned by the allocator.
+    const new_buf = if (self.paste_allocated)
+        try self.allocator.realloc(self.paste_buf, new_len)
+    else
+        try self.allocator.alloc(u8, new_len);
     self.paste_buf = new_buf;
-    // Mark as allocated (handles case where startPaste's initial alloc failed)
     self.paste_allocated = true;
 }
 
