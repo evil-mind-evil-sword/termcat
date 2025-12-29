@@ -41,6 +41,18 @@ pub const freeConstraintSizes = constraint_mod.freeSizes;
 // Basic widgets (Phase 2)
 pub const Label = @import("Label.zig").Label;
 pub const Button = @import("Button.zig").Button;
+const progress_mod = @import("ProgressBar.zig");
+pub const ProgressBar = progress_mod.ProgressBar;
+pub const ProgressBarStyle = progress_mod.BarStyle;
+pub const Spinner = progress_mod.Spinner;
+pub const SpinnerStyle = progress_mod.Spinner.SpinnerStyle;
+const input_mod = @import("InputField.zig");
+pub const InputField = input_mod.InputField;
+pub const EditAction = input_mod.EditAction;
+pub const Modal = @import("Modal.zig").Modal;
+const tabs_mod = @import("Tabs.zig");
+pub const Tabs = tabs_mod.Tabs;
+pub const Tab = tabs_mod.Tab;
 
 // Decorator widgets (Phase 2)
 const padding_mod = @import("Padding.zig");
@@ -60,8 +72,39 @@ pub const ScrollView = @import("ScrollView.zig").ScrollView;
 // Focus management (Phase 4)
 pub const FocusManager = @import("FocusManager.zig").FocusManager;
 
+// Keybinding system (Phase 1)
+const keymap_mod = @import("KeyMap.zig");
+pub const KeyMap = keymap_mod.KeyMap;
+pub const Binding = keymap_mod.Binding;
+pub const Command = keymap_mod.Command;
+pub const default_app_keymap = keymap_mod.default_app_keymap;
+
+// Mouse hit-testing (Phase 1)
+const hittest_mod = @import("HitTest.zig");
+pub const HitTester = hittest_mod.HitTester;
+pub const HitResult = hittest_mod.HitResult;
+pub const HitOptions = hittest_mod.HitOptions;
+pub const HitRect = hittest_mod.Rect;
+
+// Event routing (Phase 1)
+const eventrouter_mod = @import("EventRouter.zig");
+pub const EventRouter = eventrouter_mod.EventRouter;
+pub const EventHandler = eventrouter_mod.EventHandler;
+pub const RouteResult = eventrouter_mod.EventResult;
+
 // MVU runtime (Phase 3)
-// pub const App = @import("App.zig");
+const app_mod = @import("App.zig");
+pub const App = app_mod.App;
+pub const Cmd = app_mod.Cmd;
+pub const Sub = app_mod.Sub;
+pub const InitResult = app_mod.InitResult;
+pub const UpdateResult = app_mod.UpdateResult;
+
+const runner_mod = @import("AppRunner.zig");
+pub const AppRunnerOptions = runner_mod.Options;
+pub const frameTimeMs = runner_mod.frameTimeMs;
+pub const executeCmd = runner_mod.executeCmd;
+pub const checkTimer = runner_mod.checkTimer;
 
 // Placeholder until widget system is implemented
 pub const version = "0.1.0-dev";
