@@ -277,6 +277,18 @@ zig build -Doptimize=ReleaseFast
 - No sixel support (Kitty graphics only)
 - Synchronized output depends on terminal support (DEC 2026 may be ignored)
 
+## Related
+
+termcat sits between the minimal and maximal approaches to terminal I/O:
+
+**Classic Libraries.** [ncurses](https://invisible-island.net/ncurses/) has been the standard since 1996, maintained by Thomas E. Dickey. It's highly portable but assumes minimal terminal capabilities. [termbox2](https://github.com/termbox/termbox2) strips this down further—just input/output, no widgets.
+
+**Modern Alternatives.** [notcurses](https://github.com/dankamongmen/notcurses) takes the opposite approach: assume modern terminals and step down when needed. It supports multimedia, threading, and vivid colors. In Rust, [crossterm](https://github.com/crossterm-rs/crossterm) provides cross-platform terminal manipulation without ncurses dependencies.
+
+**Other Languages.** [tcell](https://github.com/gdamore/tcell) brings similar ideas to Go. [ratatui](https://ratatui.rs/) builds higher-level widgets on top of crossterm.
+
+termcat targets the middle ground: enough features for real applications (mouse, graphics, Unicode), simple enough to understand and maintain.
+
 ## License
 
 MIT - See [LICENSE](LICENSE) for details.
