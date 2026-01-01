@@ -8,12 +8,6 @@
 
 A fast and portable terminal library inspired by [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses).
 
-## Why?
-
-- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output.
-- **Cross-Platform**: Consistent behavior and API across Linux, macOS, BSD, and Windows systems.
-- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks.
-
 ## Install
 
 Add to your `build.zig.zon`:
@@ -23,6 +17,12 @@ Add to your `build.zig.zon`:
     .hash = "...",
 },
 ```
+
+## Why?
+
+- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output.
+- **Cross-Platform**: Consistent behavior and API across Linux, macOS, BSD, and Windows systems.
+- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks.
 
 ## Features
 
