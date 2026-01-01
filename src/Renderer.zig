@@ -488,7 +488,7 @@ test "Renderer emits combining marks" {
     // Set a cell with 'e' and combining acute accent (U+0301)
     buf.setCell(0, 0, Cell{
         .char = 'e',
-        .combining = .{ 0x0301, 0 }, // combining acute
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 }, // combining acute
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -534,7 +534,7 @@ test "Renderer diff skips unchanged cells" {
     // Change only one cell
     buf.setCell(2, 0, Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -557,7 +557,7 @@ test "Renderer handles combining marks in diff" {
     // First render with plain 'e'
     buf.setCell(0, 0, Cell{
         .char = 'e',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -570,7 +570,7 @@ test "Renderer handles combining marks in diff" {
     // Now change to 'e' with combining mark - should trigger re-render
     buf.setCell(0, 0, Cell{
         .char = 'e',
-        .combining = .{ 0x0301, 0 },
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},

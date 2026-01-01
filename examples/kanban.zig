@@ -232,7 +232,7 @@ fn drawKanbanBoard(root: *Plane, size: Event.Size, selected_col: usize, selected
             if (is_selected) {
                 root.setCell(task_x, task_y, .{
                     .char = '>',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = Color.cyan,
                     .bg = .default,
                     .attrs = .{ .bold = true },
@@ -242,7 +242,7 @@ fn drawKanbanBoard(root: *Plane, size: Event.Size, selected_col: usize, selected
             // Priority
             root.setCell(task_x + 1, task_y, .{
                 .char = priority_char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = priority_color,
                 .bg = .default,
                 .attrs = .{},

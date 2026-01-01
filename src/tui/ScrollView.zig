@@ -192,7 +192,7 @@ pub const ScrollView = struct {
         while (y < scrollbar_height) : (y += 1) {
             view.setCell(@intCast(x), @intCast(y), Cell{
                 .char = default_scrollbar.track,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = self.fg,
                 .bg = self.bg,
                 .attrs = .{},
@@ -206,7 +206,7 @@ pub const ScrollView = struct {
             while (ty < scrollbar_height) : (ty += 1) {
                 view.setCell(@intCast(x), @intCast(ty), Cell{
                     .char = default_scrollbar.thumb,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = self.thumb_fg,
                     .bg = self.thumb_bg,
                     .attrs = .{},
@@ -235,7 +235,7 @@ pub const ScrollView = struct {
                 if (pos_y < scrollbar_height) {
                     view.setCell(@intCast(x), @intCast(pos_y), Cell{
                         .char = default_scrollbar.thumb,
-                        .combining = .{ 0, 0 },
+                        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                         .fg = self.thumb_fg,
                         .bg = self.thumb_bg,
                         .attrs = .{},
@@ -261,7 +261,7 @@ pub const ScrollView = struct {
         while (x < scrollbar_width) : (x += 1) {
             view.setCell(@intCast(x), @intCast(y), Cell{
                 .char = default_scrollbar.track,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = self.fg,
                 .bg = self.bg,
                 .attrs = .{},
@@ -274,7 +274,7 @@ pub const ScrollView = struct {
             while (tx < scrollbar_width) : (tx += 1) {
                 view.setCell(@intCast(tx), @intCast(y), Cell{
                     .char = default_scrollbar.thumb,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = self.thumb_fg,
                     .bg = self.thumb_bg,
                     .attrs = .{},
@@ -299,7 +299,7 @@ pub const ScrollView = struct {
                 if (pos_x < scrollbar_width) {
                     view.setCell(@intCast(pos_x), @intCast(y), Cell{
                         .char = default_scrollbar.thumb,
-                        .combining = .{ 0, 0 },
+                        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                         .fg = self.thumb_fg,
                         .bg = self.thumb_bg,
                         .attrs = .{},
@@ -393,7 +393,7 @@ const TestWidget = struct {
             while (x < size.width) : (x += 1) {
                 view.setCell(x, y, Cell{
                     .char = self.char,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = .default,
                     .bg = .default,
                     .attrs = .{},

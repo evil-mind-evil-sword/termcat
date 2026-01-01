@@ -254,7 +254,7 @@ pub fn blitBufferToBuffer(
                         // This is an orphan continuation at the end - replace with space
                         dest.setCell(dest_x +| dx_u, dest_y +| dy_u, Cell{
                             .char = ' ',
-                            .combining = .{ 0, 0 },
+                            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                             .fg = cell.fg,
                             .bg = cell.bg,
                             .attrs = cell.attrs,
@@ -276,7 +276,7 @@ pub fn blitBufferToBuffer(
                         // Wide char at right edge - replace with space to avoid orphan base
                         dest.setCell(dest_x +| dx_u, dest_y +| dy_u, Cell{
                             .char = ' ',
-                            .combining = .{ 0, 0 },
+                            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                             .fg = cell.fg,
                             .bg = cell.bg,
                             .attrs = cell.attrs,
@@ -322,7 +322,7 @@ pub fn blitBufferToBuffer(
                         // Wide char at right edge - replace with space to avoid orphan base
                         dest.setCell(dest_x +| dx, dest_y +| dy, Cell{
                             .char = ' ',
-                            .combining = .{ 0, 0 },
+                            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                             .fg = cell.fg,
                             .bg = cell.bg,
                             .attrs = cell.attrs,
@@ -436,7 +436,7 @@ pub fn tileBufferToBuffer(
                     // Wide char at boundary - replace with space
                     dest.setCell(dx, dy, Cell{
                         .char = ' ',
-                        .combining = .{ 0, 0 },
+                        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                         .fg = cell.fg,
                         .bg = cell.bg,
                         .attrs = cell.attrs,
@@ -586,7 +586,7 @@ test "isTransparent" {
     // Cell with character is not transparent
     const char_cell = Cell{
         .char = 'A',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -596,7 +596,7 @@ test "isTransparent" {
     // Cell with background color is not transparent
     const bg_cell = Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Cell.Color.blue,
         .attrs = .{},
@@ -606,7 +606,7 @@ test "isTransparent" {
     // Cell with attributes is not transparent
     const attr_cell = Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{ .reverse = true },
@@ -616,7 +616,7 @@ test "isTransparent" {
     // Continuation cells (char == 0) are NEVER transparent
     const continuation_cell = Cell{
         .char = 0,
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -626,7 +626,7 @@ test "isTransparent" {
     // Cell with combining marks is not transparent
     const combining_cell = Cell{
         .char = ' ',
-        .combining = .{ 0x0301, 0 },
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -672,8 +672,8 @@ test "blitBufferToBuffer with transparency" {
     var src = try Buffer.init(allocator, .{ .width = 5, .height = 1 });
     defer src.deinit();
     // Set only positions 0 and 2, leave 1, 3, 4 as transparent (default)
-    src.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
-    src.setCell(2, 0, Cell{ .char = 'Y', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    src.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    src.setCell(2, 0, Cell{ .char = 'Y', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
 
     // Blit with transparency
     blitBufferToBuffer(&dest, 0, 0, &src, .{ .transparent = true });
@@ -697,7 +697,7 @@ test "blitBufferToBuffer without transparency overwrites all" {
     // Create source with sparse content
     var src = try Buffer.init(allocator, .{ .width = 5, .height = 1 });
     defer src.deinit();
-    src.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    src.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
 
     // Blit without transparency (default)
     blitBufferToBuffer(&dest, 0, 0, &src, .{});
@@ -802,10 +802,10 @@ test "tileBufferToBuffer basic tiling" {
     // Create a 2x2 tile pattern
     var tile = try Buffer.init(allocator, .{ .width = 2, .height = 2 });
     defer tile.deinit();
-    tile.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 0, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(0, 1, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 1, Cell{ .char = 'D', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 0, Cell{ .char = 'B', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 1, Cell{ .char = 'C', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 1, Cell{ .char = 'D', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Create destination
     var dest = try Buffer.init(allocator, .{ .width = 6, .height = 4 });
@@ -841,9 +841,9 @@ test "tileBufferToBuffer with transparency" {
     // Create a 2x2 tile with a transparent hole
     var tile = try Buffer.init(allocator, .{ .width = 2, .height = 2 });
     defer tile.deinit();
-    tile.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
     // (1, 0) is transparent (default)
-    tile.setCell(0, 1, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 1, Cell{ .char = 'B', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
     // (1, 1) is transparent (default)
 
     // Tile with transparency
@@ -867,12 +867,12 @@ test "tileBufferToBuffer partial tile at edges" {
     // Create a 3x3 tile
     var tile = try Buffer.init(allocator, .{ .width = 3, .height = 3 });
     defer tile.deinit();
-    tile.setCell(0, 0, Cell{ .char = '1', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 0, Cell{ .char = '2', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(2, 0, Cell{ .char = '3', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(0, 1, Cell{ .char = '4', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 1, Cell{ .char = '5', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(2, 1, Cell{ .char = '6', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 0, Cell{ .char = '1', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 0, Cell{ .char = '2', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(2, 0, Cell{ .char = '3', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 1, Cell{ .char = '4', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 1, Cell{ .char = '5', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(2, 1, Cell{ .char = '6', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Create destination with odd size (5x4 != multiple of 3x3)
     var dest = try Buffer.init(allocator, .{ .width = 5, .height = 4 });
@@ -903,7 +903,7 @@ test "Sprite basic operations" {
     try std.testing.expectEqual(@as(u16, 3), sprite.height());
 
     // Set and get cells
-    sprite.setCell(1, 1, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
+    sprite.setCell(1, 1, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.red, .bg = .default, .attrs = .{} });
     try std.testing.expectEqual(@as(u21, 'X'), sprite.getCell(1, 1).char);
 
     // Default cells are transparent
@@ -925,9 +925,9 @@ test "Sprite blitTo with transparency" {
     // Create sprite with sparse content
     var sprite = try Sprite.init(allocator, .{ .width = 3, .height = 1 });
     defer sprite.deinit();
-    sprite.setCell(0, 0, Cell{ .char = '*', .combining = .{ 0, 0 }, .fg = Cell.Color.yellow, .bg = .default, .attrs = .{} });
+    sprite.setCell(0, 0, Cell{ .char = '*', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.yellow, .bg = .default, .attrs = .{} });
     // Position 1 is transparent
-    sprite.setCell(2, 0, Cell{ .char = '*', .combining = .{ 0, 0 }, .fg = Cell.Color.yellow, .bg = .default, .attrs = .{} });
+    sprite.setCell(2, 0, Cell{ .char = '*', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.yellow, .bg = .default, .attrs = .{} });
 
     // Blit sprite to plane (transparency enabled by default)
     sprite.blitTo(plane, 2, 0);
@@ -967,8 +967,8 @@ test "tileBufferToPlane" {
     // Create tile
     var tile = try Buffer.init(allocator, .{ .width = 2, .height = 1 });
     defer tile.deinit();
-    tile.setCell(0, 0, Cell{ .char = '#', .combining = .{ 0, 0 }, .fg = Cell.Color.blue, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 0, Cell{ .char = '.', .combining = .{ 0, 0 }, .fg = Cell.Color.cyan, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 0, Cell{ .char = '#', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.blue, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 0, Cell{ .char = '.', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Cell.Color.cyan, .bg = .default, .attrs = .{} });
 
     // Create plane
     const plane = try Plane.initRoot(allocator, .{ .width = 6, .height = 2 });
@@ -1030,10 +1030,10 @@ test "tileBufferToBuffer clipping to destination bounds" {
 
     var tile = try Buffer.init(allocator, .{ .width = 2, .height = 2 });
     defer tile.deinit();
-    tile.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(0, 1, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    tile.setCell(1, 1, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(0, 1, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    tile.setCell(1, 1, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     var dest = try Buffer.init(allocator, .{ .width = 5, .height = 3 });
     defer dest.deinit();
@@ -1270,16 +1270,16 @@ test "blitBufferToBuffer overlapping with wide chars forward shift" {
     // Manually set cells to avoid print() complexity:
     // Position: 0    1      2         3  4  5  6  7  8  9
     // Content:  A    中     [cont]    B  C  D  E  F  G  H
-    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // 中
-    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // continuation
-    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // 中
+    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} }); // continuation
+    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Copy from [0-4] to [3-7] - shifts by 3
     // Source region copies: A, 中, [cont], B, C (5 cells)
@@ -1354,16 +1354,16 @@ test "blitBufferToBuffer reverse copy fallback for wide chars" {
     // Set up buffer with wide character
     // Position: 0    1      2         3  4  5  6  7  8  9
     // Content:  A    中     [cont]    B  C  D  E  F  G  H
-    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(0, 0, Cell{ .char = 'A', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(1, 0, Cell{ .char = 0x4E2D, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(2, 0, Cell{ .char = 0, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(3, 0, Cell{ .char = 'B', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(4, 0, Cell{ .char = 'C', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(5, 0, Cell{ .char = 'D', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(6, 0, Cell{ .char = 'E', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(7, 0, Cell{ .char = 'F', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(8, 0, Cell{ .char = 'G', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    buf.setCell(9, 0, Cell{ .char = 'H', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Forward shift by 2 (overlapping, would corrupt without reverse copy or temp buffer)
     blitBufferToBuffer(&buf, 2, 0, &buf, .{

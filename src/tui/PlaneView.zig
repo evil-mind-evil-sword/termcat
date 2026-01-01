@@ -105,7 +105,7 @@ pub const PlaneView = struct {
             if (self.isInBounds(col, y)) {
                 self.setCell(col, y, Cell{
                     .char = char,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = style,
                     .bg = .default,
                     .attrs = .{},
@@ -136,7 +136,7 @@ pub const PlaneView = struct {
             if (self.isInBounds(col, y)) {
                 self.setCell(col, y, Cell{
                     .char = cp,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = fg,
                     .bg = bg,
                     .attrs = attrs,
@@ -145,7 +145,7 @@ pub const PlaneView = struct {
                 if (char_width == 2 and self.isInBounds(col + 1, y)) {
                     self.setCell(col + 1, y, Cell{
                         .char = Cell.WIDE_CONTINUATION,
-                        .combining = .{ 0, 0 },
+                        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                         .fg = fg,
                         .bg = bg,
                         .attrs = attrs,
@@ -196,7 +196,7 @@ test "PlaneView setCell and getCell" {
 
     const cell = Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -217,7 +217,7 @@ test "PlaneView out of bounds setCell" {
 
     const cell = Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -275,7 +275,7 @@ test "PlaneView clear" {
     // Set a cell
     const cell = Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -300,7 +300,7 @@ test "PlaneView fill" {
 
     const fill_cell = Cell{
         .char = '#',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},

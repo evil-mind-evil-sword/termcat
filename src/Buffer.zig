@@ -100,7 +100,7 @@ pub fn resizePreserving(self: *Buffer, new_size: Size) !void {
                 // Replace with space, preserving fg/bg/attrs
                 new_cells[last_col_idx] = Cell{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = last_cell.fg,
                     .bg = last_cell.bg,
                     .attrs = last_cell.attrs,
@@ -235,7 +235,7 @@ pub fn print(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: Colo
                 // Can't fit wide char at final column - replace with space
                 self.setCell(cur_x, y, Cell{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = fg,
                     .bg = bg,
                     .attrs = attrs,
@@ -246,7 +246,7 @@ pub fn print(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: Colo
             // First cell: the character
             self.setCell(cur_x, y, Cell{
                 .char = cp,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,
@@ -259,7 +259,7 @@ pub fn print(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: Colo
             // Regular width character (width 1)
             self.setCell(cur_x, y, Cell{
                 .char = cp,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,
@@ -369,7 +369,7 @@ pub fn printLen(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: C
             if (cur_x + 1 >= self.width) {
                 self.setCell(cur_x, y, Cell{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = fg,
                     .bg = bg,
                     .attrs = attrs,
@@ -380,7 +380,7 @@ pub fn printLen(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: C
             }
             self.setCell(cur_x, y, Cell{
                 .char = cp,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,
@@ -391,7 +391,7 @@ pub fn printLen(self: *Buffer, x: u16, y: u16, str: []const u8, fg: Color, bg: C
         } else {
             self.setCell(cur_x, y, Cell{
                 .char = cp,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,

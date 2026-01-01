@@ -477,7 +477,7 @@ test "HeadlessBackend clearBuffer" {
     try std.testing.expectEqual(@as(u21, 'X'), backend.getCell(0, 0).char);
 
     backend.clearBuffer();
-    try std.testing.expectEqual(@as(u21, ' '), backend.getCell(0, 0).char);  // Default cell has space, not 0
+    try std.testing.expectEqual(@as(u21, ' '), backend.getCell(0, 0).char); // Default cell has space, not 0
 }
 
 test "HeadlessBackend toString" {

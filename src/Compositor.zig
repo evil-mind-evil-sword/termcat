@@ -282,7 +282,7 @@ fn compositePlaneRegion(self: *Compositor, plane: *const Plane, region: Rect, pl
             )) {
                 cell = .{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = cell.fg,
                     .bg = cell.bg,
                     .attrs = cell.attrs,
@@ -918,7 +918,7 @@ test "isTransparent" {
     // Cell with character is not transparent
     const char_cell = Cell{
         .char = 'A',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -928,7 +928,7 @@ test "isTransparent" {
     // Cell with background color is not transparent
     const bg_cell = Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Cell.Color.blue,
         .attrs = .{},
@@ -938,7 +938,7 @@ test "isTransparent" {
     // Cell with attributes is not transparent
     const attr_cell = Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{ .reverse = true },
@@ -948,7 +948,7 @@ test "isTransparent" {
     // Continuation cells (char == 0) are NEVER transparent (wide char integrity)
     const continuation_cell = Cell{
         .char = 0,
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -1044,8 +1044,8 @@ test "Compositor clears plane dirty flags after compose" {
     defer allocator.free(dirty1);
 
     // Draw on both planes
-    root.setCell(0, 0, Cell{ .char = 'R', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    child.setCell(0, 0, Cell{ .char = 'C', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(0, 0, Cell{ .char = 'R', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    child.setCell(0, 0, Cell{ .char = 'C', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     try std.testing.expect(root.isDirty());
     try std.testing.expect(child.isDirty());

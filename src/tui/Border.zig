@@ -164,7 +164,7 @@ pub const Border = struct {
     fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color, attrs: Cell.Attributes) Cell {
         return .{
             .char = char,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = fg,
             .bg = bg,
             .attrs = attrs,

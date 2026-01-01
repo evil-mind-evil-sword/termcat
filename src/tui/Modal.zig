@@ -110,7 +110,7 @@ pub const Modal = struct {
         if (self.show_backdrop) {
             const backdrop_cell = Cell{
                 .char = self.backdrop_char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = self.backdrop_style.fg,
                 .bg = self.backdrop_style.bg,
                 .attrs = self.backdrop_style.attrs,
@@ -151,7 +151,7 @@ pub const Modal = struct {
         // Fill dialog background
         const fill_cell = Cell{
             .char = ' ',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = self.border_fg,
             .bg = self.border_bg,
             .attrs = .{},
@@ -243,7 +243,7 @@ pub const Modal = struct {
     fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
         return .{
             .char = char,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = fg,
             .bg = bg,
             .attrs = .{},
@@ -348,7 +348,7 @@ test "Modal render without backdrop" {
     var view = PlaneView.init(root);
     const dot_cell = Cell{
         .char = '.',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -401,7 +401,7 @@ test "Modal not visible skips render" {
     var view = PlaneView.init(root);
     const dot_cell = Cell{
         .char = '.',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},

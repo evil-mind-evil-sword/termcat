@@ -321,7 +321,7 @@ test "Renderer output contains color sequences for true color" {
     const buf = renderer.buffer();
     buf.setCell(0, 0, Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = Cell.Color.fromRgb(255, 0, 0),
         .bg = .default,
         .attrs = .{},
@@ -342,7 +342,7 @@ test "Renderer output downgrades colors for basic mode" {
     const buf = renderer.buffer();
     buf.setCell(0, 0, Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = Cell.Color.fromRgb(255, 0, 0),
         .bg = .default,
         .attrs = .{},
@@ -363,7 +363,7 @@ test "Renderer output contains attribute sequences" {
     const buf = renderer.buffer();
     buf.setCell(0, 0, Cell{
         .char = 'B',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{ .bold = true },
@@ -396,7 +396,7 @@ test "Renderer diff output is smaller than full redraw" {
     // Change just one cell
     buf.setCell(10, 5, Cell{
         .char = 'O',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},

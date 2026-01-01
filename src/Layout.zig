@@ -457,7 +457,7 @@ fn findNextWord(text: []const u8) struct { word: []const u8, rest: []const u8, b
 fn makeCell(char: u21, fg: Color, bg: Color, attrs: Attributes) Cell {
     return .{
         .char = char,
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = fg,
         .bg = bg,
         .attrs = attrs,

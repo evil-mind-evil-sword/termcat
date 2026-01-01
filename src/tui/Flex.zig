@@ -274,7 +274,7 @@ const TestWidget = struct {
             while (x < size.width) : (x += 1) {
                 view.setCell(x, y, Cell{
                     .char = self.char,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = .default,
                     .bg = .default,
                     .attrs = .{},

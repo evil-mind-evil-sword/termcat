@@ -189,7 +189,7 @@ fn blitAscii(
 
             dest.setCell(dest_x + cx, dest_y + cy, .{
                 .char = char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = .{},
@@ -292,7 +292,7 @@ fn blitHalfBlock(
 
             dest.setCell(dest_x + cx, dest_y + cy, .{
                 .char = char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = .{},
@@ -378,7 +378,7 @@ fn blitQuadrant(
 
             dest.setCell(dest_x + cx, dest_y + cy, .{
                 .char = char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = .{},
@@ -479,7 +479,7 @@ fn blitBraille(
 
             dest.setCell(dest_x + cx, dest_y + cy, .{
                 .char = char,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = .{},

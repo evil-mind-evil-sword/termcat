@@ -243,7 +243,7 @@ fn drawLogViewer(root: *Plane, size: Event.Size, scroll_offset: usize, selected_
     while (x < width - 1) : (x += 1) {
         root.setCell(x, header_y + 1, .{
             .char = '─',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(60, 60, 60),
             .bg = .default,
             .attrs = .{},
@@ -301,7 +301,7 @@ fn drawFilterBar(root: *Plane, width: u16, filter: *const Filter) void {
         // Key hint
         root.setCell(x, y, .{
             .char = '[',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(100, 100, 100),
             .bg = .default,
             .attrs = .{},
@@ -309,7 +309,7 @@ fn drawFilterBar(root: *Plane, width: u16, filter: *const Filter) void {
         x += 1;
         root.setCell(x, y, .{
             .char = f.key,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.yellow,
             .bg = .default,
             .attrs = .{},
@@ -317,7 +317,7 @@ fn drawFilterBar(root: *Plane, width: u16, filter: *const Filter) void {
         x += 1;
         root.setCell(x, y, .{
             .char = ']',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(100, 100, 100),
             .bg = .default,
             .attrs = .{},
@@ -332,7 +332,7 @@ fn drawFilterBar(root: *Plane, width: u16, filter: *const Filter) void {
         for (label) |c| {
             root.setCell(x, y, .{
                 .char = c,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = .default,
                 .attrs = attrs,
@@ -352,7 +352,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
         while (x < width - 1) : (x += 1) {
             root.setCell(x, y, .{
                 .char = ' ',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = .default,
                 .bg = bg,
                 .attrs = .{},
@@ -364,7 +364,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
     if (is_selected) {
         root.setCell(1, y, .{
             .char = '▶',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.cyan,
             .bg = bg,
             .attrs = .{},
@@ -377,7 +377,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
         if (x >= 14) break;
         root.setCell(x, y, .{
             .char = c,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(150, 150, 150),
             .bg = bg,
             .attrs = .{},
@@ -391,7 +391,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
     for (level_label) |c| {
         root.setCell(x, y, .{
             .char = c,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = log.level.color(),
             .bg = bg,
             .attrs = .{ .bold = true },
@@ -405,7 +405,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
         if (x >= 31) break;
         root.setCell(x, y, .{
             .char = c,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(180, 180, 180),
             .bg = bg,
             .attrs = .{},
@@ -420,7 +420,7 @@ fn drawLogLine(root: *Plane, y: u16, width: u16, log: LogEntry, is_selected: boo
     for (log.message[0..msg_len]) |c| {
         root.setCell(x, y, .{
             .char = c,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = if (is_selected) Color.white else .default,
             .bg = bg,
             .attrs = .{},
@@ -461,7 +461,7 @@ fn drawDetailsPanel(root: *Plane, size: Event.Size, selected_line: usize, filter
         while (x < panel_x + panel_width) : (x += 1) {
             root.setCell(x, y, .{
                 .char = ' ',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = .default,
                 .bg = Color.fromRgb(30, 30, 40),
                 .attrs = .{},

@@ -63,7 +63,7 @@ pub fn main() !void {
     const cursor_plane = try Plane.initChild(term.rootPlane(), 0, 0, .{ .width = 1, .height = 1 });
     cursor_plane.setCell(0, 0, .{
         .char = '+',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = Color.fromRgb(255, 255, 0),
         .bg = .default,
         .attrs = .{ .bold = true },
@@ -237,7 +237,7 @@ fn drawStarfield(plane: *Plane, size: termcat.Size) void {
         };
         plane.setCell(x, y, .{
             .char = char,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(brightness, brightness, brightness),
             .bg = .default,
             .attrs = .{},
@@ -256,7 +256,7 @@ fn twinkleStars(plane: *Plane, size: termcat.Size, frame: u32) void {
         const blue_tint: u8 = @truncate((@as(u16, brightness) + 50) % 256);
         plane.setCell(x, y, .{
             .char = '*',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(brightness, brightness, blue_tint),
             .bg = .default,
             .attrs = .{ .bold = rand.boolean() },
@@ -273,7 +273,7 @@ fn drawWindow(plane: *Plane, title: []const u8, color: Color) void {
         for (0..w) |x| {
             plane.setCell(@intCast(x), @intCast(y), .{
                 .char = ' ',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = .default,
                 .bg = dark_bg,
                 .attrs = .{},
@@ -284,24 +284,24 @@ fn drawWindow(plane: *Plane, title: []const u8, color: Color) void {
     // Draw border
     const border_color = color;
     // Top
-    plane.setCell(0, 0, .{ .char = 0x256D, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╭
+    plane.setCell(0, 0, .{ .char = 0x256D, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╭
     for (1..w - 1) |x| {
-        plane.setCell(@intCast(x), 0, .{ .char = 0x2500, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ─
+        plane.setCell(@intCast(x), 0, .{ .char = 0x2500, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ─
     }
-    plane.setCell(w - 1, 0, .{ .char = 0x256E, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╮
+    plane.setCell(w - 1, 0, .{ .char = 0x256E, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╮
 
     // Sides
     for (1..h - 1) |y| {
-        plane.setCell(0, @intCast(y), .{ .char = 0x2502, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // │
-        plane.setCell(w - 1, @intCast(y), .{ .char = 0x2502, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // │
+        plane.setCell(0, @intCast(y), .{ .char = 0x2502, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // │
+        plane.setCell(w - 1, @intCast(y), .{ .char = 0x2502, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // │
     }
 
     // Bottom
-    plane.setCell(0, h - 1, .{ .char = 0x2570, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╰
+    plane.setCell(0, h - 1, .{ .char = 0x2570, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╰
     for (1..w - 1) |x| {
-        plane.setCell(@intCast(x), h - 1, .{ .char = 0x2500, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ─
+        plane.setCell(@intCast(x), h - 1, .{ .char = 0x2500, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ─
     }
-    plane.setCell(w - 1, h - 1, .{ .char = 0x256F, .combining = .{ 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╯
+    plane.setCell(w - 1, h - 1, .{ .char = 0x256F, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = border_color, .bg = dark_bg, .attrs = .{} }); // ╯
 
     // Title
     const title_x = (w -| @as(u16, @intCast(title.len))) / 2;
@@ -334,8 +334,8 @@ fn drawColorPalette(plane: *Plane) void {
     for (0..16) |i| {
         const x: u16 = @intCast(2 + (i % 8) * 3);
         const y: u16 = @intCast(3 + i / 8);
-        plane.setCell(x, y, .{ .char = 0x2588, .combining = .{ 0, 0 }, .fg = .{ .index = @intCast(i) }, .bg = dark_bg, .attrs = .{} });
-        plane.setCell(x + 1, y, .{ .char = 0x2588, .combining = .{ 0, 0 }, .fg = .{ .index = @intCast(i) }, .bg = dark_bg, .attrs = .{} });
+        plane.setCell(x, y, .{ .char = 0x2588, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .{ .index = @intCast(i) }, .bg = dark_bg, .attrs = .{} });
+        plane.setCell(x + 1, y, .{ .char = 0x2588, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .{ .index = @intCast(i) }, .bg = dark_bg, .attrs = .{} });
     }
 
     plane.print(2, 6, "RGB Gradient:", Color.white, dark_bg, .{});
@@ -346,7 +346,7 @@ fn drawColorPalette(plane: *Plane) void {
         const r: u8 = @intCast(i * 10);
         const g: u8 = @intCast(255 -| i * 10);
         const b: u8 = 128;
-        plane.setCell(x, 7, .{ .char = 0x2588, .combining = .{ 0, 0 }, .fg = Color.fromRgb(r, g, b), .bg = dark_bg, .attrs = .{} });
+        plane.setCell(x, 7, .{ .char = 0x2588, .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.fromRgb(r, g, b), .bg = dark_bg, .attrs = .{} });
     }
 
     plane.print(2, 9, "Attrs:", Color.white, dark_bg, .{});
@@ -366,9 +366,9 @@ fn drawBall(plane: *Plane) void {
 
 fn drawBallWithColor(plane: *Plane, rgb: Rgb) void {
     const fg = Color.fromRgb(rgb.r, rgb.g, rgb.b);
-    plane.setCell(0, 0, .{ .char = '(', .combining = .{ 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
-    plane.setCell(1, 0, .{ .char = 'o', .combining = .{ 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
-    plane.setCell(2, 0, .{ .char = ')', .combining = .{ 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
+    plane.setCell(0, 0, .{ .char = '(', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
+    plane.setCell(1, 0, .{ .char = 'o', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
+    plane.setCell(2, 0, .{ .char = ')', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = fg, .bg = .default, .attrs = .{ .bold = true } });
 }
 
 fn drawStatusBar(plane: *Plane, frame: u32, mx: i32, my: i32, size: termcat.Size, caps: termcat.Capabilities) void {
@@ -376,7 +376,7 @@ fn drawStatusBar(plane: *Plane, frame: u32, mx: i32, my: i32, size: termcat.Size
     for (0..plane.width) |x| {
         plane.setCell(@intCast(x), 0, .{
             .char = ' ',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.black,
             .bg = Color.white,
             .attrs = .{},

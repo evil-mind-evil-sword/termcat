@@ -234,6 +234,11 @@ pub fn invalidatePlaneMove(self: *Terminal, plane: *const Plane, old_x: i32, old
 /// Uses synchronized output (DEC mode 2026) for flicker-free rendering
 /// on terminals that support it.
 pub fn present(self: *Terminal) !void {
+    // Early return if nothing is dirty - avoids unnecessary allocation and composition
+    if (!self.dirty and !self.renderer.cursor_dirty) {
+        return;
+    }
+
     // Ensure compositor targets the current renderer buffer (Terminal can be moved).
     self.compositor.target = self.renderer.buffer();
 
@@ -274,6 +279,139 @@ pub fn showCursor(self: *Terminal, x: u16, y: u16) void {
 /// Hide the cursor.
 pub fn hideCursor(self: *Terminal) void {
     self.setCursor(null);
+}
+
+// ============================================================================
+// Terminal control
+// ============================================================================
+
+/// Cursor styles supported by most modern terminals (DECSCUSR)
+pub const CursorStyle = enum(u3) {
+    /// Default cursor (terminal-defined, usually blinking block)
+    default = 0,
+    /// Blinking block cursor
+    blinking_block = 1,
+    /// Steady (non-blinking) block cursor
+    steady_block = 2,
+    /// Blinking underline cursor
+    blinking_underline = 3,
+    /// Steady underline cursor
+    steady_underline = 4,
+    /// Blinking bar (vertical line) cursor
+    blinking_bar = 5,
+    /// Steady bar cursor
+    steady_bar = 6,
+};
+
+/// Set the cursor style.
+/// Uses DECSCUSR (CSI Ps SP q) escape sequence.
+pub fn setCursorStyle(self: *Terminal, style: CursorStyle) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    try w.print("\x1b[{d} q", .{@intFromEnum(style)});
+}
+
+/// Send a bell (audible or visual alert).
+/// Uses BEL character (0x07).
+pub fn bell(self: *Terminal) !void {
+    try self.backend.output_buffer.appendSlice(self.backend.allocator, "\x07");
+}
+
+/// Set the terminal window title.
+/// Uses OSC 2 (Set Window Title) escape sequence.
+pub fn setTitle(self: *Terminal, title: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    try w.print("\x1b]2;{s}\x1b\\", .{title});
+}
+
+/// Set the terminal icon name (shown in taskbar/dock).
+/// Uses OSC 1 (Set Icon Name) escape sequence.
+pub fn setIconName(self: *Terminal, name: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    try w.print("\x1b]1;{s}\x1b\\", .{name});
+}
+
+/// Set both window title and icon name.
+/// Uses OSC 0 (Set Icon Name and Window Title) escape sequence.
+pub fn setTitleAndIcon(self: *Terminal, title: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    try w.print("\x1b]0;{s}\x1b\\", .{title});
+}
+
+// ============================================================================
+// Clipboard (OSC 52)
+// ============================================================================
+
+/// Clipboard selection target
+pub const ClipboardSelection = enum {
+    /// Primary selection (middle-click paste on X11)
+    primary,
+    /// Clipboard (Ctrl+C/Ctrl+V)
+    clipboard,
+};
+
+/// Write data to the system clipboard using OSC 52.
+/// Note: Not all terminals support this; some require explicit opt-in.
+/// Supported by: kitty, iTerm2, WezTerm, foot, Alacritty, xterm (with allowWindowOps).
+pub fn clipboardWrite(self: *Terminal, selection: ClipboardSelection, data: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    const sel_char: u8 = switch (selection) {
+        .primary => 'p',
+        .clipboard => 'c',
+    };
+
+    // OSC 52 ; selection ; base64-data ST
+    try w.print("\x1b]52;{c};", .{sel_char});
+
+    // Write base64-encoded data
+    const encoder = std.base64.standard.Encoder;
+    const encoded_len = encoder.calcSize(data.len);
+    const encoded_buf = try self.allocator.alloc(u8, encoded_len);
+    defer self.allocator.free(encoded_buf);
+    _ = encoder.encode(encoded_buf, data);
+    try w.writeAll(encoded_buf);
+
+    // String terminator
+    try w.writeAll("\x1b\\");
+}
+
+/// Copy text to the clipboard (convenience wrapper for clipboardWrite).
+pub fn copy(self: *Terminal, text: []const u8) !void {
+    try self.clipboardWrite(.clipboard, text);
+}
+
+// ============================================================================
+// Hyperlinks (OSC 8)
+// ============================================================================
+
+/// Begin a hyperlink region.
+/// All text written after this will be part of the clickable link until endHyperlink is called.
+/// Uses OSC 8 escape sequence.
+/// Supported by: kitty, iTerm2, VTE-based terminals, Windows Terminal.
+pub fn beginHyperlink(self: *Terminal, url: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    // OSC 8 ; params ; uri ST
+    // params can include id=value for linking multiple regions
+    try w.print("\x1b]8;;{s}\x1b\\", .{url});
+}
+
+/// Begin a hyperlink region with an explicit ID.
+/// Multiple regions with the same ID are treated as part of the same link.
+pub fn beginHyperlinkWithId(self: *Terminal, url: []const u8, id: []const u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    try w.print("\x1b]8;id={s};{s}\x1b\\", .{ id, url });
+}
+
+/// End the current hyperlink region.
+pub fn endHyperlink(self: *Terminal) !void {
+    try self.backend.output_buffer.appendSlice(self.backend.allocator, "\x1b]8;;\x1b\\");
+}
+
+/// Write a complete hyperlink (convenience wrapper).
+/// Writes the URL, then the display text, then ends the link.
+pub fn writeHyperlink(self: *Terminal, url: []const u8, text: []const u8) !void {
+    try self.beginHyperlink(url);
+    try self.backend.output_buffer.appendSlice(self.backend.allocator, text);
+    try self.endHyperlink();
 }
 
 // ============================================================================

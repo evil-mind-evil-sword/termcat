@@ -968,7 +968,7 @@ test "cell operations" {
 
     const cell = Cell{
         .char = 'X',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = Color.red,
         .bg = Color.blue,
         .attrs = .{ .bold = true },
@@ -1007,7 +1007,7 @@ test "clear and fill" {
 
     const fill_cell = Cell{
         .char = '#',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = Color.green,
         .bg = .default,
         .attrs = .{},
@@ -1195,7 +1195,7 @@ test "setCell marks plane dirty" {
     try std.testing.expect(!root.isDirty());
 
     // Set a cell
-    root.setCell(5, 3, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(5, 3, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Now dirty
     try std.testing.expect(root.isDirty());
@@ -1231,7 +1231,7 @@ test "fill marks region dirty" {
     const root = try Plane.initRoot(allocator, .{ .width = 80, .height = 24 });
     defer root.deinit();
 
-    const fill_cell = Cell{ .char = '#', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} };
+    const fill_cell = Cell{ .char = '#', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} };
     root.fill(.{ .x = 5, .y = 3, .width = 10, .height = 4 }, fill_cell);
 
     try std.testing.expect(root.isDirty());
@@ -1295,8 +1295,8 @@ test "multiple operations expand dirty region" {
     defer root.deinit();
 
     // Set two cells at opposite corners
-    root.setCell(5, 3, Cell{ .char = 'A', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
-    root.setCell(20, 10, Cell{ .char = 'B', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(5, 3, Cell{ .char = 'A', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(20, 10, Cell{ .char = 'B', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Dirty region should be the bounding box
     const dirty = root.dirty_rect.?;
@@ -1312,7 +1312,7 @@ test "takeDirtyRect clears dirty flag" {
     const root = try Plane.initRoot(allocator, .{ .width = 80, .height = 24 });
     defer root.deinit();
 
-    root.setCell(5, 3, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(5, 3, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
     try std.testing.expect(root.isDirty());
 
     // Take the dirty rect
@@ -1334,7 +1334,7 @@ test "getDirtyScreenRect converts to screen coordinates" {
     const child = try Plane.initChild(root, 10, 5, .{ .width = 30, .height = 15 });
 
     // Draw at local (3, 2)
-    child.setCell(3, 2, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    child.setCell(3, 2, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Screen position should be (13, 7) = (10+3, 5+2)
     const screen_dirty = child.getDirtyScreenRect();
@@ -1373,7 +1373,7 @@ test "getDirtyScreenRect returns null for hidden plane" {
     defer root.deinit();
 
     const child = try Plane.initChild(root, 10, 5, .{ .width = 30, .height = 15 });
-    child.setCell(3, 2, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    child.setCell(3, 2, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Should return valid rect while visible
     try std.testing.expect(child.getDirtyScreenRect() != null);
@@ -1390,7 +1390,7 @@ test "out of bounds setCell does not mark dirty" {
     defer root.deinit();
 
     // Try to set cell outside bounds
-    root.setCell(100, 100, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
+    root.setCell(100, 100, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = .default, .bg = .default, .attrs = .{} });
 
     // Should not be dirty
     try std.testing.expect(!root.isDirty());

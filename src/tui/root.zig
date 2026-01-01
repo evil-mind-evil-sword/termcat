@@ -23,6 +23,20 @@ const theme_mod = @import("Theme.zig");
 pub const Theme = theme_mod.Theme;
 pub const Style = theme_mod.Style;
 
+// Styled text (Phase 4)
+const styled_text_mod = @import("StyledText.zig");
+pub const StyledText = styled_text_mod.StyledText;
+pub const StyledTextBuilder = styled_text_mod.StyledTextBuilder;
+pub const Span = styled_text_mod.Span;
+
+// Text truncation (Phase 4)
+const truncation_mod = @import("Truncation.zig");
+pub const TruncationPolicy = truncation_mod.Policy;
+pub const TruncationResult = truncation_mod.Result;
+pub const truncateText = truncation_mod.truncate;
+pub const freeTruncationResult = truncation_mod.freeResult;
+pub const applyFade = truncation_mod.applyFade;
+
 // Widget identity (Phase 1)
 const id_mod = @import("Id.zig");
 pub const Id = id_mod.Id;

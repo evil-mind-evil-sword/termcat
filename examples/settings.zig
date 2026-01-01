@@ -246,7 +246,7 @@ fn drawSettingsUI(root: *Plane, size: Event.Size, state: *State) void {
     while (y < height - 1) : (y += 1) {
         root.setCell(sidebar_width, y, .{
             .char = '│',
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = Color.fromRgb(100, 100, 100),
             .bg = .default,
             .attrs = .{},
@@ -281,7 +281,7 @@ fn drawSidebar(root: *Plane, sidebar_width: u16, height: u16, state: *State) voi
             while (x < sidebar_width) : (x += 1) {
                 root.setCell(x, y, .{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = .default,
                     .bg = Color.fromRgb(40, 60, 80),
                     .attrs = .{},
@@ -292,7 +292,7 @@ fn drawSidebar(root: *Plane, sidebar_width: u16, height: u16, state: *State) voi
         // Draw icon
         root.setCell(2, y, .{
             .char = cat.icon,
-            .combining = .{ 0, 0 },
+            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
             .fg = if (is_selected) Color.cyan else Color.fromRgb(180, 180, 180),
             .bg = if (is_focused) Color.fromRgb(40, 60, 80) else .default,
             .attrs = .{},
@@ -308,7 +308,7 @@ fn drawSidebar(root: *Plane, sidebar_width: u16, height: u16, state: *State) voi
             if (x >= sidebar_width - 1) break;
             root.setCell(x, y, .{
                 .char = c,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = fg,
                 .bg = bg,
                 .attrs = attrs,
@@ -320,7 +320,7 @@ fn drawSidebar(root: *Plane, sidebar_width: u16, height: u16, state: *State) voi
         if (is_selected) {
             root.setCell(sidebar_width - 1, y, .{
                 .char = if (state.in_settings_pane) '›' else '▶',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = Color.cyan,
                 .bg = if (is_focused) Color.fromRgb(40, 60, 80) else .default,
                 .attrs = .{},
@@ -350,7 +350,7 @@ fn drawContent(root: *Plane, content_x: u16, content_width: u16, height: u16, st
             while (x < content_x + content_width - 1) : (x += 1) {
                 root.setCell(x, y, .{
                     .char = ' ',
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = .default,
                     .bg = Color.fromRgb(40, 60, 80),
                     .attrs = .{},
@@ -366,7 +366,7 @@ fn drawContent(root: *Plane, content_x: u16, content_width: u16, height: u16, st
         for (setting.label) |c| {
             root.setCell(x, y, .{
                 .char = c,
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = label_fg,
                 .bg = label_bg,
                 .attrs = .{},
@@ -391,7 +391,7 @@ fn drawSettingValue(root: *Plane, x: u16, y: u16, value: Setting.Value, is_selec
             for (text) |c| {
                 root.setCell(px, y, .{
                     .char = c,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = fg,
                     .bg = bg,
                     .attrs = .{ .bold = true },
@@ -407,7 +407,7 @@ fn drawSettingValue(root: *Plane, x: u16, y: u16, value: Setting.Value, is_selec
             for (selected_text[0..display_len]) |ch| {
                 root.setCell(px, y, .{
                     .char = ch,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = Color.yellow,
                     .bg = bg,
                     .attrs = .{},
@@ -422,7 +422,7 @@ fn drawSettingValue(root: *Plane, x: u16, y: u16, value: Setting.Value, is_selec
 
             root.setCell(x, y, .{
                 .char = '[',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = Color.fromRgb(100, 100, 100),
                 .bg = bg,
                 .attrs = .{},
@@ -434,7 +434,7 @@ fn drawSettingValue(root: *Plane, x: u16, y: u16, value: Setting.Value, is_selec
                 const fg: Color = if (px < filled) Color.cyan else Color.fromRgb(60, 60, 60);
                 root.setCell(x + 1 + px, y, .{
                     .char = char,
-                    .combining = .{ 0, 0 },
+                    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                     .fg = fg,
                     .bg = bg,
                     .attrs = .{},
@@ -443,7 +443,7 @@ fn drawSettingValue(root: *Plane, x: u16, y: u16, value: Setting.Value, is_selec
 
             root.setCell(x + bar_width + 1, y, .{
                 .char = ']',
-                .combining = .{ 0, 0 },
+                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
                 .fg = Color.fromRgb(100, 100, 100),
                 .bg = bg,
                 .attrs = .{},

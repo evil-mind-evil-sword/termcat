@@ -4,15 +4,25 @@ const std = @import("std");
 pub const Cell = @This();
 
 /// Maximum number of combining marks that can be attached to a cell.
-/// Covers common cases like é (e + acute), ö (o + umlaut), etc.
-pub const MAX_COMBINING: usize = 2;
+/// Increased from 2 to 8 to support:
+/// - Complex scripts (Devanagari, Arabic with full diacritics)
+/// - Extended grapheme clusters with multiple modifiers
+/// - Most practical combining character sequences
+///
+/// Note: ZWJ (Zero Width Joiner) emoji sequences like 👨‍👩‍👧‍👦 are handled
+/// differently - they're stored as multiple codepoints in the combining array.
+/// Very long ZWJ sequences may be truncated to MAX_COMBINING codepoints.
+pub const MAX_COMBINING: usize = 8;
 
 /// Unicode codepoint (or first codepoint of grapheme).
 /// 0 indicates a continuation cell (second half of wide character).
 char: u21,
-/// Combining marks attached to this cell (e.g., accents, diacritics).
+/// Combining marks or additional codepoints attached to this cell.
+/// Used for:
+/// - Combining marks (accents, diacritics)
+/// - ZWJ sequences (emoji modifiers, family emoji)
 /// Zero values indicate unused slots.
-combining: [MAX_COMBINING]u21 = .{ 0, 0 },
+combining: [MAX_COMBINING]u21 = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
 /// Foreground color
 fg: Color,
 /// Background color
@@ -307,7 +317,7 @@ pub const Attributes = packed struct {
 /// The default cell used for clear() and out-of-bounds reads
 pub const default: Cell = .{
     .char = ' ',
-    .combining = .{ 0, 0 },
+    .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
     .fg = .default,
     .bg = .default,
     .attrs = .{},
@@ -322,7 +332,7 @@ pub fn isContinuation(self: Cell) bool {
 pub fn continuation(fg: Color, bg: Color, attrs: Attributes) Cell {
     return .{
         .char = 0,
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = fg,
         .bg = bg,
         .attrs = attrs,
@@ -331,10 +341,11 @@ pub fn continuation(fg: Color, bg: Color, attrs: Attributes) Cell {
 
 /// Check if two cells are equal
 pub fn eql(self: Cell, other: Cell) bool {
-    return self.char == other.char and
-        self.combining[0] == other.combining[0] and
-        self.combining[1] == other.combining[1] and
-        self.fg.eql(other.fg) and
+    if (self.char != other.char) return false;
+    for (self.combining, other.combining) |a, b| {
+        if (a != b) return false;
+    }
+    return self.fg.eql(other.fg) and
         self.bg.eql(other.bg) and
         self.attrs.eql(other.attrs);
 }
@@ -643,7 +654,7 @@ test "Color.downgrade to true_color" {
 test "Cell addCombining" {
     var cell: Cell = .{
         .char = 'e',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -652,21 +663,27 @@ test "Cell addCombining" {
     // First combining mark should succeed
     try std.testing.expect(cell.addCombining(0x0301)); // Combining acute accent
     try std.testing.expectEqual(@as(u21, 0x0301), cell.combining[0]);
-    try std.testing.expectEqual(@as(u21, 0), cell.combining[1]);
 
     // Second combining mark should succeed
     try std.testing.expect(cell.addCombining(0x0327)); // Combining cedilla
-    try std.testing.expectEqual(@as(u21, 0x0301), cell.combining[0]);
     try std.testing.expectEqual(@as(u21, 0x0327), cell.combining[1]);
 
-    // Third combining mark should fail (only 2 slots)
-    try std.testing.expect(!cell.addCombining(0x0308)); // Combining diaeresis
+    // Fill remaining slots (3-8)
+    try std.testing.expect(cell.addCombining(0x0308)); // Combining diaeresis
+    try std.testing.expect(cell.addCombining(0x0300)); // Combining grave
+    try std.testing.expect(cell.addCombining(0x0302)); // Combining circumflex
+    try std.testing.expect(cell.addCombining(0x0303)); // Combining tilde
+    try std.testing.expect(cell.addCombining(0x0304)); // Combining macron
+    try std.testing.expect(cell.addCombining(0x0306)); // Combining breve
+
+    // 9th combining mark should fail (only 8 slots)
+    try std.testing.expect(!cell.addCombining(0x0307)); // Combining dot above
 }
 
 test "Cell hasCombining" {
     const no_combining: Cell = .{
         .char = 'a',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -675,7 +692,7 @@ test "Cell hasCombining" {
 
     const with_combining: Cell = .{
         .char = 'e',
-        .combining = .{ 0x0301, 0 },
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
@@ -686,28 +703,28 @@ test "Cell hasCombining" {
 test "Cell eql with combining marks" {
     const cell1: Cell = .{
         .char = 'e',
-        .combining = .{ 0x0301, 0 },
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
     };
     const cell2: Cell = .{
         .char = 'e',
-        .combining = .{ 0x0301, 0 },
+        .combining = .{ 0x0301, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = .default,
         .attrs = .{},
     };
     const cell3: Cell = .{
         .char = 'e',
-        .combining = .{ 0x0300, 0 }, // Different combining mark
+        .combining = .{ 0x0300, 0, 0, 0, 0, 0, 0, 0 }, // Different combining mark
         .fg = .default,
         .bg = .default,
         .attrs = .{},
     };
     const cell4: Cell = .{
         .char = 'e',
-        .combining = .{ 0, 0 }, // No combining marks
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, // No combining marks
         .fg = .default,
         .bg = .default,
         .attrs = .{},

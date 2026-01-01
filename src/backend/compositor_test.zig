@@ -168,9 +168,9 @@ test "Compositor transparency: holes show underlying content" {
 
     // Overlay with transparency holes (only draw at positions 0, 2, 4)
     const overlay = try Plane.initChild(root, 0, 0, .{ .width = 10, .height = 1 });
-    overlay.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
-    overlay.setCell(2, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
-    overlay.setCell(4, 0, Cell{ .char = 'X', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    overlay.setCell(0, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    overlay.setCell(2, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    overlay.setCell(4, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
     // Positions 1, 3, 5-9 are default/transparent
 
     const dirty = try compositor.compose(root);
@@ -206,7 +206,7 @@ test "Compositor transparency: opaque background blocks lower layers" {
     // Fill with spaces but with non-default background - should be opaque
     dialog.fill(.{ .x = 0, .y = 0, .width = 4, .height = 1 }, Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Color.blue, // Non-default background = opaque
         .attrs = .{},
@@ -471,7 +471,7 @@ test "Compositor wide characters: overlay with transparency preserves wide chars
     // Transparent overlay positioned to NOT cover any wide char base positions
     // Position 8 is after all the wide chars, so it won't corrupt anything
     const overlay = try Plane.initChild(root, 0, 0, .{ .width = 10, .height = 1 });
-    overlay.setCell(8, 0, Cell{ .char = '*', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    overlay.setCell(8, 0, Cell{ .char = '*', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
 
     const dirty = try compositor.compose(root);
     defer allocator.free(dirty);
@@ -507,7 +507,7 @@ test "Compositor wide characters: overlay does not corrupt adjacent wide chars" 
 
     // Overlay with marker at position 0 (doesn't touch wide char)
     const overlay = try Plane.initChild(root, 0, 0, .{ .width = 10, .height = 1 });
-    overlay.setCell(0, 0, Cell{ .char = '*', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    overlay.setCell(0, 0, Cell{ .char = '*', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
 
     const dirty = try compositor.compose(root);
     defer allocator.free(dirty);
@@ -552,7 +552,7 @@ test "PTY compositor: render layered planes through PTY" {
     const dialog = try Plane.initChild(root, 5, 5, .{ .width = 20, .height = 5 });
     dialog.fill(.{ .x = 0, .y = 0, .width = 20, .height = 5 }, Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Color.blue,
         .attrs = .{},
@@ -728,9 +728,9 @@ test "Compositor with Blit: sprite overlay" {
     // Create a sprite and blit to a plane
     var sprite = try Blit.Sprite.init(allocator, .{ .width = 3, .height = 1 });
     defer sprite.deinit();
-    sprite.setCell(0, 0, Cell{ .char = '<', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
-    sprite.setCell(1, 0, Cell{ .char = 'o', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
-    sprite.setCell(2, 0, Cell{ .char = '>', .combining = .{ 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    sprite.setCell(0, 0, Cell{ .char = '<', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    sprite.setCell(1, 0, Cell{ .char = 'o', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
+    sprite.setCell(2, 0, Cell{ .char = '>', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.red, .bg = .default, .attrs = .{} });
 
     // Create overlay plane and blit sprite to it
     const overlay = try Plane.initChild(root, 5, 0, .{ .width = 10, .height = 3 });
@@ -749,6 +749,36 @@ test "Compositor with Blit: sprite overlay" {
     try expectCell(&target, 9, 0, '>', Color.red);
 
     // Background after sprite
+    try expectCell(&target, 10, 0, '#', Color.blue);
+
+    // =========================================================================
+    // Second frame: Update sprite and re-blit
+    // This tests that dirty tracking works correctly for plane-targeted blits
+    // =========================================================================
+
+    // Update sprite content
+    sprite.setCell(0, 0, Cell{ .char = '[', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.green, .bg = .default, .attrs = .{} });
+    sprite.setCell(1, 0, Cell{ .char = 'X', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.green, .bg = .default, .attrs = .{} });
+    sprite.setCell(2, 0, Cell{ .char = ']', .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 }, .fg = Color.green, .bg = .default, .attrs = .{} });
+
+    // Re-blit to the overlay plane
+    sprite.blitTo(overlay, 2, 0);
+
+    // Manually invalidate the plane since blitTo doesn't auto-invalidate the compositor
+    // This is the expected API behavior: caller must invalidate after modifying plane content
+    try compositor.invalidatePlane(overlay);
+
+    // Second compose
+    const dirty2 = try compositor.compose(root);
+    defer allocator.free(dirty2);
+
+    // Verify the updated sprite content appears
+    try expectCell(&target, 7, 0, '[', Color.green);
+    try expectCell(&target, 8, 0, 'X', Color.green);
+    try expectCell(&target, 9, 0, ']', Color.green);
+
+    // Background should still be intact
+    try expectCell(&target, 0, 0, '#', Color.blue);
     try expectCell(&target, 10, 0, '#', Color.blue);
 }
 
@@ -864,7 +894,7 @@ test "Compositor nested hierarchy: grandchildren render correctly" {
     const window = try Plane.initChild(root, 5, 3, .{ .width = 20, .height = 10 });
     window.fill(.{ .x = 0, .y = 0, .width = 20, .height = 10 }, Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Color.blue,
         .attrs = .{},
@@ -873,7 +903,7 @@ test "Compositor nested hierarchy: grandchildren render correctly" {
     const titlebar = try Plane.initChild(window, 0, 0, .{ .width = 20, .height = 1 });
     titlebar.fill(.{ .x = 0, .y = 0, .width = 20, .height = 1 }, Cell{
         .char = ' ',
-        .combining = .{ 0, 0 },
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = .default,
         .bg = Color.cyan,
         .attrs = .{},
