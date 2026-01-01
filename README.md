@@ -20,19 +20,11 @@ Add to your `build.zig.zon`:
 
 ## Why?
 
-- **Diff-Based Rendering**: Efficient double-buffering updates only what changed, minimizing terminal output.
-- **Cross-Platform**: Consistent behavior and API across Linux, macOS, BSD, and Windows systems.
-- **Unicode-Aware**: Correct handling of wide characters, emoji, and combining marks.
+Terminal libraries tend to fall into two camps: simple ones like termbox that work everywhere but lack features, and complex ones like notcurses that do everything but are hard to port. termcat aims for the middle ground—enough features for real applications, simple enough to understand and maintain.
 
-## Features
+The core abstraction is a cell grid. You write characters to cells, and termcat diffs against the previous frame to emit only the escape sequences that changed. This keeps output minimal and rendering fast. Unicode handling follows the terminal's expectations: wide characters (CJK, emoji) occupy two cells, combining marks attach to their base character.
 
-- **Cell-based rendering**: Efficient diff-based updates that minimize terminal output
-- **Input handling**: Keyboard, mouse, bracketed paste, and focus events
-- **Color support**: Automatic fallback from true color to 256 to 16 colors based on terminal capabilities
-- **Unicode support**: Wide characters (CJK, emoji) and combining marks
-- **Text attributes**: Bold, italic, underline, strikethrough, dim, reverse, blink
-- **Synchronized output**: DEC 2026 mode for flicker-free rendering on supporting terminals
-- **Kitty graphics**: Optional encoder for Kitty graphics protocol frames
+termcat works on POSIX systems and Windows 10+ (using VT sequences over the Console API). Colors automatically downgrade based on what the terminal supports—true color to 256-color to 16-color.
 
 ## Platform Support
 
