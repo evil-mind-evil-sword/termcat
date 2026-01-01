@@ -19,7 +19,7 @@ A fast and portable terminal library inspired by [termbox2](https://github.com/t
 Add to your `build.zig.zon`:
 ```zig
 .termcat = .{
-    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v0.1.0.tar.gz",
+    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v26.1.1.1.tar.gz",
     .hash = "...",
 },
 ```
