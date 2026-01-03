@@ -67,6 +67,72 @@ pub const Modal = @import("Modal.zig").Modal;
 const tabs_mod = @import("Tabs.zig");
 pub const Tabs = tabs_mod.Tabs;
 pub const Tab = tabs_mod.Tab;
+const screenstack_mod = @import("ScreenStack.zig");
+pub const ScreenStack = screenstack_mod.ScreenStack;
+pub const Screen = screenstack_mod.Screen;
+const rule_mod = @import("Rule.zig");
+pub const Rule = rule_mod.Rule;
+pub const RuleDirection = rule_mod.Direction;
+pub const RuleLineStyle = rule_mod.LineStyle;
+pub const Loading = @import("Loading.zig").Loading;
+const header_mod = @import("Header.zig");
+pub const Header = header_mod.Header;
+pub const Footer = header_mod.Footer;
+pub const KeyHint = header_mod.KeyHint;
+pub const Link = @import("Link.zig").Link;
+const checkbox_mod = @import("Checkbox.zig");
+pub const Checkbox = checkbox_mod.Checkbox;
+pub const CheckboxStyle = checkbox_mod.CheckboxStyle;
+pub const RadioButton = checkbox_mod.RadioButton;
+pub const Switch = checkbox_mod.Switch;
+const listview_mod = @import("ListView.zig");
+pub const ListView = listview_mod.ListView;
+pub const ListItem = listview_mod.ListItem;
+const select_mod = @import("Select.zig");
+pub const Select = select_mod.Select;
+pub const SelectOption = select_mod.Option;
+pub const Collapsible = @import("Collapsible.zig").Collapsible;
+pub const TextArea = @import("TextArea.zig").TextArea;
+const log_mod = @import("Log.zig");
+pub const Log = log_mod.Log;
+pub const LogLevel = log_mod.LogLevel;
+pub const LogEntry = log_mod.LogEntry;
+const toast_mod = @import("Toast.zig");
+pub const Toast = toast_mod.Toast;
+pub const ToastLevel = toast_mod.ToastLevel;
+pub const ToastMessage = toast_mod.ToastMessage;
+const sparkline_mod = @import("Sparkline.zig");
+pub const Sparkline = sparkline_mod.Sparkline;
+pub const Digits = sparkline_mod.Digits;
+const autocomplete_mod = @import("Autocomplete.zig");
+pub const Autocomplete = autocomplete_mod.Autocomplete;
+pub const Suggestion = autocomplete_mod.Suggestion;
+pub const prefixFilter = autocomplete_mod.prefixFilter;
+pub const prefixFilterIgnoreCase = autocomplete_mod.prefixFilterIgnoreCase;
+pub const containsFilter = autocomplete_mod.containsFilter;
+const tree_mod = @import("Tree.zig");
+pub const Tree = tree_mod.Tree;
+pub const TreeNode = tree_mod.TreeNode;
+const datatable_mod = @import("DataTable.zig");
+pub const DataTable = datatable_mod.DataTable;
+pub const DataTableColumn = datatable_mod.Column;
+pub const DataTableRow = datatable_mod.Row;
+const diff_mod = @import("Diff.zig");
+pub const Diff = diff_mod.Diff;
+pub const DiffLine = diff_mod.DiffLine;
+pub const DiffLineType = diff_mod.LineType;
+pub const DiffMode = diff_mod.DiffMode;
+const markdown_mod = @import("Markdown.zig");
+pub const Markdown = markdown_mod.Markdown;
+pub const MarkdownBlock = markdown_mod.Block;
+pub const MarkdownBlockType = markdown_mod.BlockType;
+pub const parseMarkdownBlockType = markdown_mod.parseBlockType;
+pub const Terminal = @import("Terminal.zig").Terminal;
+const cmdpalette_mod = @import("CommandPalette.zig");
+pub const CommandPalette = cmdpalette_mod.CommandPalette;
+pub const PaletteCommand = cmdpalette_mod.Command;
+pub const fuzzyFilter = cmdpalette_mod.fuzzyFilter;
+pub const palettePrefixFilter = cmdpalette_mod.prefixFilter;
 
 // Decorator widgets (Phase 2)
 const padding_mod = @import("Padding.zig");
@@ -119,6 +185,13 @@ pub const AppRunnerOptions = runner_mod.Options;
 pub const frameTimeMs = runner_mod.frameTimeMs;
 pub const executeCmd = runner_mod.executeCmd;
 pub const checkTimer = runner_mod.checkTimer;
+
+// Testing utilities (Phase 9)
+pub const Snapshot = @import("Snapshot.zig");
+
+// Performance utilities (Phase 8)
+pub const MeasureCache = @import("MeasureCache.zig");
+pub const FramePacer = @import("FramePacer.zig");
 
 // Placeholder until widget system is implemented
 pub const version = "0.1.0-dev";

@@ -415,6 +415,42 @@ pub fn writeHyperlink(self: *Terminal, url: []const u8, text: []const u8) !void 
 }
 
 // ============================================================================
+// Palette Colors (OSC 4)
+// ============================================================================
+
+/// Set a palette color (indices 0-255).
+/// Uses OSC 4 escape sequence with X11 rgb: format.
+/// This modifies the terminal's color palette for the duration of the session.
+///
+/// Color indices:
+/// - 0-7: Standard colors (black, red, green, yellow, blue, magenta, cyan, white)
+/// - 8-15: Bright colors
+/// - 16-231: 6x6x6 color cube
+/// - 232-255: Grayscale ramp
+///
+/// Supported by: xterm, VTE-based terminals, kitty, iTerm2, Windows Terminal.
+pub fn setPaletteColor(self: *Terminal, index: u8, r: u8, g: u8, b: u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    // OSC 4 ; index ; rgb:RR/GG/BB ST
+    // Using 2-digit hex (scaled to 16-bit range is also valid, but 8-bit is simpler)
+    try w.print("\x1b]4;{d};rgb:{x:0>2}/{x:0>2}/{x:0>2}\x1b\\", .{ index, r, g, b });
+}
+
+/// Reset a palette color to the terminal's default.
+/// Uses OSC 104 escape sequence.
+pub fn resetPaletteColor(self: *Terminal, index: u8) !void {
+    const w = self.backend.output_buffer.writer(self.backend.allocator);
+    // OSC 104 ; index ST
+    try w.print("\x1b]104;{d}\x1b\\", .{index});
+}
+
+/// Reset all palette colors to the terminal's defaults.
+/// Uses OSC 104 with no index parameter.
+pub fn resetAllPaletteColors(self: *Terminal) !void {
+    try self.backend.output_buffer.appendSlice(self.backend.allocator, "\x1b]104\x1b\\");
+}
+
+// ============================================================================
 // Events
 // ============================================================================
 
