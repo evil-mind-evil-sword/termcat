@@ -17,7 +17,7 @@ termcat sits between minimal libraries like [termbox2](https://github.com/termbo
 | **Graphics** | Kitty graphics protocol, pixel blitting (ASCII, half-block, quadrant, braille) |
 | **Input** | Keyboard with modifiers, mouse tracking, bracketed paste, focus events |
 | **Unicode** | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences |
-| **TUI** | 40+ widgets, constraint-based layout, MVU application framework, theming |
+| **TUI** | 35+ widgets, constraint-based layout, MVU application framework, theming |
 | **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+ |
 
 **Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI applications.
@@ -27,7 +27,7 @@ termcat sits between minimal libraries like [termbox2](https://github.com/termbo
 Add to your `build.zig.zon`:
 ```zig
 .termcat = .{
-    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v26.1.1.1.tar.gz",
+    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v26.1.1.2.tar.gz",
     .hash = "...",
 },
 ```
@@ -306,7 +306,7 @@ Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
 | Feature | termcat | termbox2 | notcurses |
 |---------|---------|----------|-----------|
 | Binary size | 54-140KB | ~20KB | 500KB-2MB |
-| Widgets | 40+ | None | Minimal |
+| Widgets | 35+ | None | Minimal |
 | Graphics | Kitty, blitting | None | Sixel, Kitty, video |
 | Threading | Single | Single | Multi |
 | Dependencies | None | None | ffmpeg (optional) |
