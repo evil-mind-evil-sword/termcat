@@ -209,7 +209,7 @@ termcat includes a complete widget library for building terminal applications.
 | **Layout** | Flex (Row/Column), Padding, Border, ScrollView, Collapsible |
 | **Display** | ProgressBar, Spinner, Loading, Sparkline, DataTable, Tree |
 | **Navigation** | Tabs, Modal, ScreenStack, CommandPalette |
-| **Rich Text** | StyledText, Markdown, Diff, Toast, Log |
+| **Rich Text** | Markdown, Diff, Toast, Log |
 
 ### Layout System
 
