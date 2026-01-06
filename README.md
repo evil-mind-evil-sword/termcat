@@ -321,4 +321,4 @@ termcat provides more features than termbox2 while staying smaller and simpler t
 
 ## License
 
-MIT - See [LICENSE](LICENSE) for details.
+AGPL-3.0 - See [LICENSE](LICENSE) for details.
