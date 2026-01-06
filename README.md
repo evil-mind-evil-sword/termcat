@@ -6,7 +6,21 @@
 
 **Cell-based terminal I/O.** Diff rendering, cross-platform, Unicode-aware.
 
-A fast and portable terminal library inspired by [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses).
+termcat sits between minimal libraries like [termbox2](https://github.com/termbox/termbox2) and comprehensive ones like [notcurses](https://github.com/dankamongmen/notcurses). It provides enough features for real applications—mouse input, graphics protocols, a full widget library—while staying small enough to understand and maintain.
+
+## Features
+
+| Category | Capabilities |
+|----------|-------------|
+| **Rendering** | Double-buffered diff rendering, composable planes with z-order, synchronized output (DEC 2026) |
+| **Color** | True color, 256-color, 16-color with automatic downgrade based on terminal capabilities |
+| **Graphics** | Kitty graphics protocol, pixel blitting (ASCII, half-block, quadrant, braille) |
+| **Input** | Keyboard with modifiers, mouse tracking, bracketed paste, focus events |
+| **Unicode** | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences |
+| **TUI** | 48+ widgets, constraint-based layout, MVU application framework, theming |
+| **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+ |
+
+**Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI applications.
 
 ## Install
 
@@ -17,19 +31,6 @@ Add to your `build.zig.zon`:
     .hash = "...",
 },
 ```
-
-## Why?
-
-Terminal libraries tend to fall into two camps: simple ones like termbox that work everywhere but lack features, and complex ones like notcurses that do everything but are hard to port. termcat aims for the middle ground—enough features for real applications, simple enough to understand and maintain.
-
-The core abstraction is a cell grid. You write characters to cells, and termcat diffs against the previous frame to emit only the escape sequences that changed. This keeps output minimal and rendering fast. Unicode handling follows the terminal's expectations: wide characters (CJK, emoji) occupy two cells, combining marks attach to their base character.
-
-termcat works on POSIX systems and Windows 10+ (using VT sequences over the Console API). Colors automatically downgrade based on what the terminal supports—true color to 256-color to 16-color.
-
-## Platform Support
-
-- POSIX (Linux, macOS, BSD)
-- Windows 10+ (Console API with VT sequences)
 
 ## Quick Start
 
@@ -42,22 +43,18 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // Initialize terminal
     var term = try termcat.Terminal.init(allocator, .{});
     defer term.deinit();
 
-    // Draw to the root plane and present
     term.draw(0, 0, "Hello, termcat!", termcat.Color.green, termcat.Color.default, .{ .bold = true });
     try term.present();
 
-    // Event loop
     while (true) {
         if (try term.pollEvent(100)) |event| {
             switch (event) {
                 .key => |key| {
                     if (key.codepoint == 'q') return;
                 },
-                .resize => {}, // handled internally; use this to update layout if needed
                 else => {},
             }
         }
@@ -65,11 +62,29 @@ pub fn main() !void {
 }
 ```
 
-## API Overview
+## Architecture
 
-### Terminal
+termcat is organized in layers. Use whichever level of abstraction fits your needs.
 
-`Terminal` is the high-level, cross-platform facade:
+```
+┌─────────────────────────────────────────────────────────┐
+│  TUI Framework (termcat.tui)                            │
+│  Widgets, layout, MVU runtime, theming                  │
+├─────────────────────────────────────────────────────────┤
+│  Terminal                                               │
+│  High-level facade: draw, present, pollEvent            │
+├─────────────────────────────────────────────────────────┤
+│  Renderer + Compositor                                  │
+│  Double-buffered diff rendering, plane composition      │
+├─────────────────────────────────────────────────────────┤
+│  Backend (Posix / Windows)                              │
+│  Terminal setup, capability detection, raw I/O          │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Core API
+
+**Terminal** is the high-level facade for simple applications:
 
 ```zig
 var term = try termcat.Terminal.init(allocator, .{});
@@ -81,75 +96,45 @@ try term.present();
 if (try term.pollEvent(100)) |event| { ... }
 ```
 
-### Backend
-
-`Backend` handles terminal setup, capability detection, and I/O. Use
-`termcat.Backend` for the platform default, or `termcat.PosixBackend` /
-`termcat.WindowsBackend` explicitly when you need platform-specific options.
+**Backend** provides terminal setup and capability detection:
 
 ```zig
 var backend = try termcat.Backend.init(allocator, .{
-    .enable_mouse = true,                // Enable mouse events
-    .enable_focus_events = true,         // Enable focus in/out events
-    .enable_synchronized_output = true,  // Flicker-free rendering (if supported)
+    .enable_mouse = true,
+    .enable_focus_events = true,
+    .enable_synchronized_output = true,
 });
 defer backend.deinit();
 
-// Get terminal size
 const size = backend.getSize();
-
-// Poll for events (blocking)
-if (try backend.pollEvent(null)) |event| { ... }
-
-// Poll with timeout (milliseconds)
-if (try backend.pollEvent(100)) |event| { ... }
+const caps = backend.capabilities;  // color_depth, kitty_graphics, etc.
 ```
 
-### Renderer
-
-`Renderer` provides double-buffered, diff-based rendering:
+**Renderer** handles double-buffered diff rendering:
 
 ```zig
 var renderer = try termcat.Renderer.init(allocator, size, color_depth);
-defer renderer.deinit();
-
-// Get buffer for drawing
 const buf = renderer.buffer();
-
-// Flush changes to terminal
+buf.print(x, y, "text", fg, bg, attrs);
 try renderer.flush(backend.writer());
-
-// Handle resize
-try renderer.resize(new_size);
-
-// Set cursor position (or null to hide)
-renderer.setCursor(.{ .x = 10, .y = 5 });
 ```
 
-### Buffer
-
-`Buffer` is the drawing surface:
+**Plane** enables composable layers:
 
 ```zig
-// Print text with colors and attributes
-buf.print(x, y, "text", fg_color, bg_color, .{ .bold = true });
+var root = try termcat.Plane.initRoot(allocator, .{ .width = 80, .height = 24 });
+defer root.deinit();
 
-// Set individual cell
-buf.setCell(x, y, cell);
-
-// Fill rectangle
-buf.fill(.{ .x = 0, .y = 0, .width = 10, .height = 5 }, cell);
-
-// Clear buffer
-buf.clear();
+var popup = try termcat.Plane.initChild(root, 30, 7, .{ .width = 20, .height = 10 });
+popup.print(0, 0, "Modal dialog", .white, .blue, .{});
 ```
 
-### Colors
+### Colors and Attributes
 
 ```zig
-// Named colors (indices 0-15)
+// Named colors (0-15)
 const red = termcat.Color.red;
-const bright_green = termcat.Color.bright_green;
+const bright_cyan = termcat.Color.bright_cyan;
 
 // 256-color palette
 const color: termcat.Color = .{ .index = 196 };
@@ -157,137 +142,183 @@ const color: termcat.Color = .{ .index = 196 };
 // True color (24-bit RGB)
 const purple = termcat.Color.fromRgb(128, 0, 255);
 
-// HSL color
+// HSL and grayscale
 const orange = termcat.Color.fromHsl(30, 100, 50);
-
-// Grayscale
 const gray = termcat.Color.fromGray(128);
 
-// Default terminal color
-const default_color: termcat.Color = .default;
+// Attributes
+const attrs: termcat.Attributes = .{ .bold = true, .italic = true };
 ```
 
-Colors are automatically downgraded based on terminal capabilities.
+Colors automatically downgrade based on terminal capabilities.
 
-### Attributes
-
-```zig
-const attrs: termcat.Attributes = .{
-    .bold = true,
-    .italic = true,
-    .underline = false,
-    .strikethrough = false,
-    .reverse = false,
-    .dim = false,
-    .blink = false,
-};
-```
-
-### Events
+### Input Events
 
 ```zig
 switch (event) {
     .key => |key| {
-        if (key.codepoint) |cp| {
-            // Regular character (e.g., 'a', 'Z', space)
-        }
-        if (key.special) |sp| {
-            // Special key (e.g., .enter, .escape, .up, .f1)
-        }
-        // Modifiers
-        if (key.mods.ctrl) { ... }
-        if (key.mods.alt) { ... }
-        if (key.mods.shift) { ... }
+        if (key.codepoint) |cp| { /* regular character */ }
+        if (key.special) |sp| { /* .enter, .escape, .up, .f1, etc. */ }
+        if (key.mods.ctrl) { /* modifier keys */ }
     },
-    .mouse => |mouse| {
-        // mouse.x, mouse.y - position
-        // mouse.button - .left, .right, .middle, .wheel_up, .wheel_down, .move, .release
-        // mouse.mods - modifier keys
-    },
-    .resize => |new_size| {
-        // new_size.width, new_size.height
-    },
-    .paste => |text| {
-        // Bracketed paste content (valid until next pollEvent)
-    },
-    .focus => |focused| {
-        // true = gained focus, false = lost focus
-    },
+    .mouse => |m| { /* m.x, m.y, m.button, m.mods */ },
+    .resize => |size| { /* size.width, size.height */ },
+    .paste => |text| { /* bracketed paste content */ },
+    .focus => |focused| { /* true = gained, false = lost */ },
 }
 ```
 
-### Capability Detection
+## Graphics
+
+termcat supports two graphics modes for displaying images in the terminal.
+
+**Kitty Graphics Protocol** transmits pixel data directly to supported terminals (Kitty, Ghostty, WezTerm):
 
 ```zig
-const caps = termcat.detectCapabilities();
-// caps.color_depth: .mono, .basic, .color_256, or .true_color
-// caps.mouse: bool
-// caps.bracketed_paste: bool
-// caps.focus_events: bool
-// caps.synchronized_output: bool
-// caps.kitty_graphics: bool
+var kitty = termcat.graphics.KittyGraphics.init(allocator);
+defer kitty.deinit();
+
+try kitty.draw(backend.writer(), surface, .{
+    .image_id = 1,
+    .position = .{ .x = 0, .y = 0 },
+    .columns = 40,
+    .rows = 20,
+});
 ```
 
-### Unicode Utilities
+**Pixel Blitter** renders images using Unicode characters, working in any terminal:
 
 ```zig
-// Get display width of a codepoint
-const width = termcat.unicode.codePointWidth(cp); // 0, 1, or 2
+// Modes: .ascii (1x1), .half_block (1x2), .quadrant (2x2), .braille (2x4 pixels per cell)
+termcat.PixelBlitter.blit(buffer, x, y, surface, .{
+    .mode = .braille,
+    .color_depth = backend.capabilities.color_depth,
+});
+```
 
-// Get display width of a string
-const str_width = termcat.unicode.stringWidth("Hello");
+## TUI Framework
+
+termcat includes a complete widget library for building terminal applications.
+
+### Widgets
+
+| Category | Widgets |
+|----------|---------|
+| **Basic** | Label, Button, Link, Rule |
+| **Input** | InputField, TextArea, Checkbox, RadioButton, Switch, Select, Autocomplete |
+| **Layout** | Flex (Row/Column), Padding, Border, ScrollView, Collapsible |
+| **Display** | ProgressBar, Spinner, Loading, Sparkline, DataTable, Tree |
+| **Navigation** | Tabs, Modal, ScreenStack, CommandPalette |
+| **Rich Text** | StyledText, Markdown, Diff, Toast, Log |
+
+### Layout System
+
+Widgets use constraint-based layout with three allocation types:
+
+```zig
+var flex = termcat.tui.Flex.column();
+flex.addChild(header,  Constraint.fromFixed(3));    // exactly 3 rows
+flex.addChild(content, Constraint.fill());          // all remaining space
+flex.addChild(footer,  Constraint.fromFixed(1));    // exactly 1 row
+```
+
+### MVU Application Framework
+
+For complex applications, termcat provides an Elm-style Model-View-Update runtime:
+
+```zig
+const MyApp = termcat.tui.App(Model, Msg);
+
+pub const app: MyApp = .{
+    .initFn = init,
+    .updateFn = update,
+    .viewFn = view,
+};
+
+fn init(allocator: Allocator) MyApp.InitResult { ... }
+fn update(model: *Model, msg: Msg) MyApp.UpdateResult { ... }
+fn view(model: *const Model) termcat.tui.Widget { ... }
+
+pub fn main() !void {
+    try termcat.tui.AppRunner.run(MyApp, app, allocator, .{});
+}
+```
+
+### Theming
+
+```zig
+const theme = termcat.tui.Theme{
+    .text = .{ .fg = .white },
+    .primary = .{ .fg = .blue, .attrs = .{ .bold = true } },
+    .error_style = .{ .fg = .red },
+    // ...
+};
 ```
 
 ## Examples
 
-Build and run examples:
-
 ```bash
-# Input event logger
-zig build input_logger
-
-# Color grid demo
-zig build color_grid
-
-# Multi-plane demo
-zig build demo
-
-# Graphics demo (PixelBlitter + Kitty graphics)
-zig build graphics_demo
+zig build input_logger    # Input event debugging
+zig build color_grid      # Color palette visualization
+zig build demo            # Multi-plane composition
+zig build graphics_demo   # Pixel blitting + Kitty graphics
+zig build kanban          # TUI application example
+zig build log_viewer      # Scrollable log display
+zig build settings        # Configuration UI
+zig build widgets_demo    # TUI widget showcase
+zig build doom            # Doom in the terminal (requires WAD file)
 ```
+
+The Doom demo implements the [doomgeneric](https://github.com/ozkl/doomgeneric) platform hooks using termcat for rendering and input.
 
 ## Building
 
 ```bash
-# Build library and examples
-zig build
-
-# Run tests
-zig build test
-
-# Build with optimizations
-zig build -Doptimize=ReleaseFast
+zig build                          # Build library and examples
+zig build test                     # Run tests
+zig build -Doptimize=ReleaseSafe   # Optimized build (282KB)
+zig build -Doptimize=ReleaseSmall  # Smallest build (54KB)
 ```
 
-## Known Limitations
+## Testing
 
-- Bracketed paste is not supported on Windows
-- Maximum 2 combining marks per cell
-- Complex grapheme clusters (ZWJ sequences) are not fully supported
-- No sixel support (Kitty graphics only)
-- Synchronized output depends on terminal support (DEC 2026 may be ignored)
+termcat includes snapshot testing for visual regression detection:
+
+```zig
+try termcat.tui.Snapshot.expectWidget(
+    allocator,
+    Widget.init(Button, &button),
+    .{ .width = 20, .height = 3 },
+    "button_focused",
+);
+```
+
+Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
+
+## Limitations
+
+- No sixel graphics (Kitty protocol only)
+- Bracketed paste unavailable on Windows
+- Single-threaded design (see architecture notes)
+- Synchronized output requires terminal support (DEC 2026)
+
+## Comparison
+
+| Feature | termcat | termbox2 | notcurses |
+|---------|---------|----------|-----------|
+| Binary size | 54-140KB | ~20KB | 500KB-2MB |
+| Widgets | 48+ | None | Minimal |
+| Graphics | Kitty, blitting | None | Sixel, Kitty, video |
+| Threading | Single | Single | Multi |
+| Dependencies | None | None | ffmpeg (optional) |
+
+termcat provides more features than termbox2 while staying smaller and simpler than notcurses.
 
 ## Related
 
-termcat sits between the minimal and maximal approaches to terminal I/O:
+**Classic**: [ncurses](https://invisible-island.net/ncurses/) (Thomas E. Dickey, 1996+), [termbox2](https://github.com/termbox/termbox2)
 
-**Classic Libraries.** [ncurses](https://invisible-island.net/ncurses/) has been the standard since 1996, maintained by Thomas E. Dickey. It's highly portable but assumes minimal terminal capabilities. [termbox2](https://github.com/termbox/termbox2) strips this down further—just input/output, no widgets.
-
-**Modern Alternatives.** [notcurses](https://github.com/dankamongmen/notcurses) takes the opposite approach: assume modern terminals and step down when needed. It supports multimedia, threading, and vivid colors. In Rust, [crossterm](https://github.com/crossterm-rs/crossterm) provides cross-platform terminal manipulation without ncurses dependencies.
-
-**Other Languages.** [tcell](https://github.com/gdamore/tcell) brings similar ideas to Go. [ratatui](https://ratatui.rs/) builds higher-level widgets on top of crossterm.
-
-termcat targets the middle ground: enough features for real applications (mouse, graphics, Unicode), simple enough to understand and maintain.
+**Modern**: [notcurses](https://github.com/dankamongmen/notcurses), [crossterm](https://github.com/crossterm-rs/crossterm) (Rust), [tcell](https://github.com/gdamore/tcell) (Go), [ratatui](https://ratatui.rs/) (Rust)
 
 ## License
 
