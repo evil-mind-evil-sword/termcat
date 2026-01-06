@@ -17,7 +17,7 @@ termcat sits between minimal libraries like [termbox2](https://github.com/termbo
 | **Graphics** | Kitty graphics protocol, pixel blitting (ASCII, half-block, quadrant, braille) |
 | **Input** | Keyboard with modifiers, mouse tracking, bracketed paste, focus events |
 | **Unicode** | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences |
-| **TUI** | 48+ widgets, constraint-based layout, MVU application framework, theming |
+| **TUI** | 40+ widgets, constraint-based layout, MVU application framework, theming |
 | **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+ |
 
 **Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI applications.
@@ -265,7 +265,6 @@ zig build graphics_demo   # Pixel blitting + Kitty graphics
 zig build kanban          # TUI application example
 zig build log_viewer      # Scrollable log display
 zig build settings        # Configuration UI
-zig build widgets_demo    # TUI widget showcase
 zig build doom            # Doom in the terminal (requires WAD file)
 ```
 
