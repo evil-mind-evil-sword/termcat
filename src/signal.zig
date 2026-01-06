@@ -11,6 +11,10 @@ const posix = std.posix;
 /// Using atomic Value for thread-safe and signal-safe access
 var global_tty_fd: std.atomic.Value(posix.fd_t) = std.atomic.Value(posix.fd_t).init(-1);
 
+/// Original termios saved for restoration (restored even in signal handler)
+var global_orig_termios: posix.termios = undefined;
+var global_termios_valid: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
 /// Reference count for signal handler installation
 var signal_handler_refcount: std.atomic.Value(usize) = std.atomic.Value(usize).init(0);
 
@@ -28,14 +32,14 @@ var original_sigactions: struct {
 
 /// Call this during terminal init to enable crash-safe restore
 pub fn install(tty_fd: posix.fd_t, orig_termios: posix.termios) void {
-    _ = orig_termios; // termios is not restored in signal handler (not async-signal-safe)
-
     // Atomically increment refcount
     const prev_count = signal_handler_refcount.fetchAdd(1, .acq_rel);
 
     if (prev_count == 0) {
-        // First install: save fd and set up all signal handlers
+        // First install: save fd, termios, and set up all signal handlers
         global_tty_fd.store(tty_fd, .release);
+        global_orig_termios = orig_termios;
+        global_termios_valid.store(true, .release);
         installSignalHandlers();
     }
 }
@@ -82,13 +86,22 @@ fn signalHandler(sig: i32) callconv(.c) void {
 
 /// Restore terminal state (async-signal-safe)
 pub fn restore() void {
-    // Only use async-signal-safe operations (write)
-    // tcsetattr is NOT async-signal-safe and can deadlock
     const fd = global_tty_fd.load(.acquire);
     if (fd >= 0) {
-        // Exit alternate screen and show cursor
-        const escape = "\x1b[?1049l\x1b[?25h";
-        _ = posix.write(fd, escape) catch {};
+        // Write full cleanup sequence:
+        // - Disable synchronized output, focus events, bracketed paste
+        // - Disable mouse tracking (any-event mode + SGR mode)
+        // - Show cursor, reset attributes, exit alternate screen
+        const cleanup_seq = "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l";
+        _ = posix.write(fd, cleanup_seq) catch {};
+
+        // Attempt to restore termios (raw mode -> cooked mode)
+        // Note: tcsetattr is not strictly async-signal-safe per POSIX,
+        // but leaving terminal in raw mode is worse than the small
+        // deadlock risk. Most implementations handle this fine.
+        if (global_termios_valid.load(.acquire)) {
+            posix.tcsetattr(fd, .FLUSH, global_orig_termios) catch {};
+        }
     }
 }
 
@@ -101,6 +114,7 @@ pub fn uninstall() void {
         // Last uninstall: restore original handlers and clear state
         uninstallSignalHandlers();
         global_tty_fd.store(-1, .release);
+        global_termios_valid.store(false, .release);
     }
 }
 

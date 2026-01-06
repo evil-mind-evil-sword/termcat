@@ -176,6 +176,141 @@ pub fn build(b: *std.Build) void {
         run_example_step.dependOn(&run_example.step);
     }
 
+    // Doom demo (requires doomgeneric C sources)
+    {
+        const doom_exe = b.addExecutable(.{
+            .name = "doom",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("examples/doom/main.zig"),
+                .target = target,
+                .optimize = optimize,
+                .link_libc = true,
+                .imports = &.{
+                    .{ .name = "termcat", .module = mod },
+                },
+            }),
+        });
+
+        // Add doomgeneric include path
+        doom_exe.root_module.addIncludePath(b.path("deps/doomgeneric/doomgeneric"));
+
+        // Compile doomgeneric C sources (excluding platform-specific implementations)
+        const doom_c_sources = [_][]const u8{
+            "am_map.c",
+            "d_event.c",
+            "d_items.c",
+            "d_iwad.c",
+            "d_loop.c",
+            "d_main.c",
+            "d_mode.c",
+            "d_net.c",
+            "doomdef.c",
+            "doomgeneric.c",
+            "doomstat.c",
+            "dummy.c",
+            "dstrings.c",
+            "i_cdmus.c",
+            "f_finale.c",
+            "f_wipe.c",
+            "g_game.c",
+            "gusconf.c",
+            "hu_lib.c",
+            "hu_stuff.c",
+            "i_endoom.c",
+            "i_input.c",
+            "i_joystick.c",
+            "i_scale.c",
+            "i_sound.c",
+            "i_system.c",
+            "i_timer.c",
+            "i_video.c",
+            "icon.c",
+            "info.c",
+            "m_argv.c",
+            "m_bbox.c",
+            "m_cheat.c",
+            "m_config.c",
+            "m_controls.c",
+            "m_fixed.c",
+            "m_menu.c",
+            "m_misc.c",
+            "m_random.c",
+            "memio.c",
+            "mus2mid.c",
+            "p_ceilng.c",
+            "p_doors.c",
+            "p_enemy.c",
+            "p_floor.c",
+            "p_inter.c",
+            "p_lights.c",
+            "p_map.c",
+            "p_maputl.c",
+            "p_mobj.c",
+            "p_plats.c",
+            "p_pspr.c",
+            "p_saveg.c",
+            "p_setup.c",
+            "p_sight.c",
+            "p_spec.c",
+            "p_switch.c",
+            "p_telept.c",
+            "p_tick.c",
+            "p_user.c",
+            "r_bsp.c",
+            "r_data.c",
+            "r_draw.c",
+            "r_main.c",
+            "r_plane.c",
+            "r_segs.c",
+            "r_sky.c",
+            "r_things.c",
+            "s_sound.c",
+            "sha1.c",
+            "sounds.c",
+            "st_lib.c",
+            "st_stuff.c",
+            "statdump.c",
+            "tables.c",
+            "v_video.c",
+            "w_checksum.c",
+            "w_file.c",
+            "w_file_stdc.c",
+            "w_main.c",
+            "w_wad.c",
+            "wi_stuff.c",
+            "z_zone.c",
+        };
+
+        var c_files: [doom_c_sources.len][]const u8 = undefined;
+        for (doom_c_sources, 0..) |src, i| {
+            c_files[i] = b.fmt("deps/doomgeneric/doomgeneric/{s}", .{src});
+        }
+
+        doom_exe.addCSourceFiles(.{
+            .root = b.path("."),
+            .files = &c_files,
+            .flags = &.{
+                "-w", // Suppress warnings from C code
+                "-DNORMALUNIX",
+                "-DLINUX",
+                "-DSNDSERV",
+                "-D_DEFAULT_SOURCE",
+            },
+        });
+
+        b.installArtifact(doom_exe);
+
+        const run_doom = b.addRunArtifact(doom_exe);
+        run_doom.step.dependOn(b.getInstallStep());
+
+        if (b.args) |args| {
+            run_doom.addArgs(args);
+        }
+
+        const run_doom_step = b.step("doom", "Run Doom in the terminal");
+        run_doom_step.dependOn(&run_doom.step);
+    }
+
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
     // The Zig build system is entirely implemented in userland, which means
