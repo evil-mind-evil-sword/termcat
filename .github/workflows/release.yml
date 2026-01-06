@@ -5,27 +5,167 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
+env:
+  SITE_REPO: "evil-mind-evil-sword/evil-mind-evil-sword.github.io"
+  RELEASES_BASE: "https://evil-mind-evil-sword.github.io/releases"
+
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux-musl
+            os: ubuntu-latest
+            artifact: termcat-x86_64-linux
+          - target: aarch64-linux-musl
+            os: ubuntu-latest
+            artifact: termcat-aarch64-linux
+          - target: x86_64-macos
+            os: macos-latest
+            artifact: termcat-x86_64-macos
+          - target: aarch64-macos
+            os: macos-latest
+            artifact: termcat-aarch64-macos
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Zig
         uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
 
       - name: Build
-        run: zig build
+        run: |
+          zig build -Doptimize=ReleaseFast -Dtarget=${{ matrix.target }}
+          mv zig-out/bin/termcat ${{ matrix.artifact }}
 
-      - name: Test
-        run: zig build test
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          generate_release_notes: true
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          for dir in artifacts/*/; do
+            name=$(basename "$dir")
+            cp "$dir/$name" "release/$name"
+            chmod +x "release/$name"
+          done
+          cd release
+          sha256sum * > checksums.txt
+
+      - name: Create install script
+        run: |
+          cat > release/install.sh << 'INSTALL_SCRIPT'
+          #!/bin/sh
+          set -e
+
+          # termcat installer
+          # Usage: curl -fsSL https://evil-mind-evil-sword.github.io/releases/termcat/install.sh | sh
+
+          RELEASES_BASE="https://evil-mind-evil-sword.github.io/releases"
+          INSTALL_DIR="${TERMCAT_INSTALL_DIR:-$HOME/.local/bin}"
+
+          # Detect OS and architecture
+          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          ARCH=$(uname -m)
+
+          case "$OS" in
+            linux) OS="linux" ;;
+            darwin) OS="macos" ;;
+            *) echo "Unsupported OS: $OS"; exit 1 ;;
+          esac
+
+          case "$ARCH" in
+            x86_64|amd64) ARCH="x86_64" ;;
+            aarch64|arm64) ARCH="aarch64" ;;
+            *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          ASSET="termcat-${ARCH}-${OS}"
+
+          # Get version from manifest
+          if [ -n "$TERMCAT_VERSION" ]; then
+            VERSION="$TERMCAT_VERSION"
+          else
+            VERSION=$(curl -fsSL "${RELEASES_BASE}/manifest.json" | grep -o '"termcat"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+          fi
+
+          URL="${RELEASES_BASE}/termcat/${VERSION}/${ASSET}"
+
+          echo "Downloading termcat ${VERSION} for ${OS}/${ARCH}..."
+          TMPDIR=$(mktemp -d)
+          trap "rm -rf $TMPDIR" EXIT
+
+          curl -fsSL "$URL" -o "$TMPDIR/termcat"
+
+          # Install
+          mkdir -p "$INSTALL_DIR"
+          mv "$TMPDIR/termcat" "$INSTALL_DIR/termcat"
+          chmod +x "$INSTALL_DIR/termcat"
+
+          echo "termcat installed to $INSTALL_DIR/termcat"
+
+          if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
+            echo ""
+            echo "Add to your PATH:"
+            echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+          fi
+
+          echo ""
+          echo "Run 'termcat --help' to get started"
+          INSTALL_SCRIPT
+          chmod +x release/install.sh
+
+      - name: Checkout site repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SITE_REPO }}
+          path: site
+          token: ${{ secrets.SITE_DEPLOY_KEY }}
+
+      - name: Deploy to site
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          mkdir -p "site/releases/termcat/${VERSION}"
+          cp release/* "site/releases/termcat/${VERSION}/"
+          cp release/install.sh "site/releases/termcat/install.sh"
+
+          # Update manifest
+          cd site/releases
+          if [ -f manifest.json ]; then
+            jq --arg v "$VERSION" '.termcat = $v' manifest.json > manifest.tmp && mv manifest.tmp manifest.json
+          else
+            echo "{\"termcat\": \"$VERSION\"}" > manifest.json
+          fi
+
+      - name: Commit and push to site
+        run: |
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Release termcat ${{ steps.version.outputs.version }}" || exit 0
+          git push
