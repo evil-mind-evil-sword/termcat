@@ -396,6 +396,15 @@ fn pollFds(self: *Input, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !PollFdsResult
 /// select()-based implementation for macOS.
 /// Works correctly with /dev/tty where poll() fails.
 fn selectFds(fd: posix.fd_t, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !PollFdsResult {
+    // Debug: log which fd we're selecting on
+    const S = struct {
+        var logged: bool = false;
+    };
+    if (!S.logged) {
+        std.debug.print("[selectFds] fd={}, extra_fd={?}, timeout={?}\n", .{ fd, extra_fd, timeout_ms });
+        S.logged = true;
+    }
+
     var read_fds: c.fd_set = undefined;
 
     // Zero out the fd_set using FD_ZERO equivalent
