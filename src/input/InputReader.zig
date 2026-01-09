@@ -95,6 +95,10 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
     // Get initial terminal size
     const size = getTerminalSize(tty_fd) catch Event.Size{ .width = 80, .height = 24 };
 
+    // Use stdin for input when it's a TTY (avoids poll() quirks on /dev/tty on macOS)
+    // tty_fd is still used for terminal attributes, but input_fd is used for reading
+    const input_fd: posix.fd_t = if (posix.isatty(posix.STDIN_FILENO)) posix.STDIN_FILENO else tty_fd;
+
     // Create self-pipe for resize notifications if requested
     var resize_pipe: ?[2]posix.fd_t = null;
     var resize_slot: ?usize = null;
@@ -153,7 +157,7 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
         .owns_fd = owns_fd,
         .orig_termios = orig_termios,
         .in_raw_mode = false,
-        .input_handler = Input.init(allocator, tty_fd),
+        .input_handler = Input.init(allocator, input_fd),
         .resize_pipe = resize_pipe,
         .resize_slot = resize_slot,
         .allocator = allocator,
