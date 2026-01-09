@@ -1,7 +1,11 @@
 const std = @import("std");
 const posix = std.posix;
+const builtin = @import("builtin");
 const Event = @import("../Event.zig");
 const Decoder = @import("decoder.zig");
+const c = @cImport({
+    @cInclude("sys/select.h");
+});
 
 /// High-level input handler.
 /// Wraps the decoder with buffering and timeout handling for ambiguous sequences.
@@ -17,6 +21,11 @@ const ReadResult = union(enum) {
     would_block,
     no_space,
     eof,
+};
+
+const PollFdsResult = struct {
+    input_ready: bool,
+    extra_ready: bool,
 };
 
 /// Optional input tracing for debugging.
@@ -343,8 +352,16 @@ fn processBuffer(self: *Input) !?Event.Event {
     return null;
 }
 
-/// Poll the file descriptor for input
-fn pollFds(self: *Input, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !struct { input_ready: bool, extra_ready: bool } {
+/// Poll the file descriptor for input.
+/// On macOS, uses select() instead of poll() because poll() has a bug where it
+/// never reports POLLIN for /dev/tty file descriptors.
+fn pollFds(self: *Input, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !PollFdsResult {
+    // Use select() on macOS to work around poll() bug with /dev/tty
+    if (comptime builtin.os.tag == .macos) {
+        return selectFds(self.fd, timeout_ms, extra_fd);
+    }
+
+    // Use poll() on other platforms
     var fds: [2]posix.pollfd = undefined;
     var count: usize = 0;
 
@@ -370,6 +387,57 @@ fn pollFds(self: *Input, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !struct { inpu
     if (result > 0) {
         const input_ready = (fds[0].revents & posix.POLL.IN) != 0;
         const extra_ready = if (count > 1) (fds[1].revents & posix.POLL.IN) != 0 else false;
+        return .{ .input_ready = input_ready, .extra_ready = extra_ready };
+    }
+
+    return .{ .input_ready = false, .extra_ready = false };
+}
+
+/// select()-based implementation for macOS.
+/// Works correctly with /dev/tty where poll() fails.
+fn selectFds(fd: posix.fd_t, timeout_ms: ?u32, extra_fd: ?posix.fd_t) !PollFdsResult {
+    var read_fds: c.fd_set = undefined;
+
+    // Zero out the fd_set using FD_ZERO equivalent
+    @memset(@as([*]u8, @ptrCast(&read_fds))[0..@sizeOf(c.fd_set)], 0);
+
+    // FD_SET equivalent for macOS - fd_set on Darwin uses fds_bits
+    const fd_usize: usize = @intCast(fd);
+    const bits_per_elem = @bitSizeOf(i32);
+    read_fds.fds_bits[fd_usize / bits_per_elem] |= @as(i32, 1) << @intCast(fd_usize % bits_per_elem);
+
+    var max_fd = fd;
+
+    // Add extra fd if present
+    if (extra_fd) |efd| {
+        const efd_usize: usize = @intCast(efd);
+        read_fds.fds_bits[efd_usize / bits_per_elem] |= @as(i32, 1) << @intCast(efd_usize % bits_per_elem);
+        if (efd > max_fd) max_fd = efd;
+    }
+
+    // Set up timeout
+    var tv: c.timeval = undefined;
+    var tv_ptr: ?*c.timeval = null;
+    if (timeout_ms) |ms| {
+        tv.tv_sec = @intCast(ms / 1000);
+        tv.tv_usec = @intCast((ms % 1000) * 1000);
+        tv_ptr = &tv;
+    }
+
+    const result = c.select(max_fd + 1, &read_fds, null, null, tv_ptr);
+
+    if (result < 0) {
+        return error.SelectFailed;
+    }
+
+    if (result > 0) {
+        // FD_ISSET equivalent
+        const input_ready = (read_fds.fds_bits[fd_usize / bits_per_elem] & (@as(i32, 1) << @intCast(fd_usize % bits_per_elem))) != 0;
+        var extra_ready = false;
+        if (extra_fd) |efd| {
+            const efd_usize: usize = @intCast(efd);
+            extra_ready = (read_fds.fds_bits[efd_usize / bits_per_elem] & (@as(i32, 1) << @intCast(efd_usize % bits_per_elem))) != 0;
+        }
         return .{ .input_ready = input_ready, .extra_ready = extra_ready };
     }
 
