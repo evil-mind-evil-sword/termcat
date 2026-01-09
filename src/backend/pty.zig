@@ -8,8 +8,8 @@ pub const Pty = struct {
     master: posix.fd_t,
     /// Slave file descriptor (terminal side)
     slave: posix.fd_t,
-    /// Path to the slave device
-    slave_path: [64]u8,
+    /// Path to the slave device (128 bytes for macOS TIOCPTYGNAME compatibility)
+    slave_path: [128]u8,
 
     const Self = @This();
 
@@ -29,19 +29,9 @@ pub const Pty = struct {
             return error.UnlockPtFailed;
         }
 
-        // Get slave path - use ptsname on macOS (not thread-safe but works)
-        var slave_path: [64]u8 = undefined;
-        const path_ptr = ptsname(master);
-        if (path_ptr == null) {
-            return error.PtsnameFailed;
-        }
-
-        // Copy path to our buffer
-        var path_len: usize = 0;
-        while (path_len < slave_path.len - 1 and path_ptr.?[path_len] != 0) : (path_len += 1) {
-            slave_path[path_len] = path_ptr.?[path_len];
-        }
-        slave_path[path_len] = 0;
+        // Get slave path (thread-safe, 128 bytes for macOS TIOCPTYGNAME)
+        var slave_path: [128]u8 = undefined;
+        const path_len = try getPtsName(master, &slave_path);
 
         // Open slave
         const slave = try posix.open(slave_path[0..path_len :0], .{ .ACCMODE = .RDWR, .NOCTTY = true }, 0);
@@ -164,7 +154,54 @@ pub const Pty = struct {
 // C library functions for PTY operations
 extern fn grantpt(fd: posix.fd_t) c_int;
 extern fn unlockpt(fd: posix.fd_t) c_int;
+
+/// Get PTY slave name in a thread-safe manner.
+/// On Linux uses ptsname_r(), on macOS uses TIOCPTYGNAME ioctl.
+/// Buffer must be 128 bytes for macOS TIOCPTYGNAME compatibility.
+fn getPtsName(master: posix.fd_t, buf: *[128]u8) !usize {
+    switch (builtin.os.tag) {
+        .linux => {
+            // ptsname_r is thread-safe on Linux
+            var result: c_int = undefined;
+            result = ptsname_r(master, buf, buf.len);
+            if (result != 0) {
+                return error.PtsnameFailed;
+            }
+            // Find null terminator
+            var len: usize = 0;
+            while (len < buf.len and buf[len] != 0) : (len += 1) {}
+            return len;
+        },
+        .macos, .ios, .tvos, .watchos, .visionos => {
+            // TIOCPTYGNAME is the thread-safe alternative on Darwin
+            const TIOCPTYGNAME: c_int = @bitCast(@as(u32, 0x40807453));
+            if (posix.system.ioctl(master, TIOCPTYGNAME, @intFromPtr(buf)) != 0) {
+                return error.PtsnameFailed;
+            }
+            // Find null terminator
+            var len: usize = 0;
+            while (len < buf.len and buf[len] != 0) : (len += 1) {}
+            return len;
+        },
+        else => {
+            // Fallback: use ptsname (not thread-safe but may be only option)
+            const path_ptr = ptsname(master);
+            if (path_ptr == null) {
+                return error.PtsnameFailed;
+            }
+            var len: usize = 0;
+            while (len < buf.len - 1 and path_ptr.?[len] != 0) : (len += 1) {
+                buf[len] = path_ptr.?[len];
+            }
+            buf[len] = 0;
+            return len;
+        },
+    }
+}
+
+// Platform-specific C functions
 extern fn ptsname(fd: posix.fd_t) ?[*:0]u8;
+extern fn ptsname_r(fd: posix.fd_t, buf: [*]u8, buflen: usize) c_int;
 
 test "PTY open and close" {
     const pty = try Pty.open();

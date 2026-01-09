@@ -58,6 +58,7 @@ pub const Mouse = Event.Mouse;
 pub const input = struct {
     pub const Decoder = @import("input/decoder.zig");
     pub const Input = @import("input/Input.zig");
+    pub const InputReader = @import("input/InputReader.zig");
     pub const KeyStateTracker = @import("input/KeyStateTracker.zig");
 };
 
@@ -106,6 +107,7 @@ pub const HeadlessBackend = backend.HeadlessBackend;
 pub const Backend = backend.Backend;
 pub const Pty = backend.Pty;
 pub const Input = input.Input;
+pub const InputReader = input.InputReader;
 pub const Decoder = input.Decoder;
 pub const KeyStateTracker = input.KeyStateTracker;
 pub const Capabilities = backend.Capabilities;

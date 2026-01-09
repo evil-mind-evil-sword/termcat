@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const posix = std.posix;
 const Cell = @import("Cell.zig");
+const Input = @import("input/Input.zig");
 const Color = Cell.Color;
 const Attributes = Cell.Attributes;
 const Plane = @import("Plane.zig");
@@ -454,6 +456,9 @@ pub fn resetAllPaletteColors(self: *Terminal) !void {
 // Events
 // ============================================================================
 
+/// Poll result when using pollEventWithExtraFd (re-exported from Input)
+pub const PollResult = Input.PollResult;
+
 /// Poll for an event with optional timeout (in milliseconds).
 ///
 /// Returns null on timeout. Resize events are handled automatically,
@@ -471,6 +476,46 @@ pub fn pollEvent(self: *Terminal, timeout_ms: ?u32) !?Event.Event {
     }
 
     return event;
+}
+
+/// Poll for an event, but also return if an extra fd becomes readable.
+///
+/// Returns .extra_ready when the extra fd is readable. This enables efficient
+/// wakeup from background threads via a pipe/eventfd.
+///
+/// Example usage for background thread communication:
+/// ```zig
+/// // Create a pipe for wakeup
+/// const wakeup_pipe = try posix.pipe();
+///
+/// // In event loop:
+/// const result = try term.pollEventWithExtraFd(100, wakeup_pipe[0]);
+/// if (result) |r| switch (r) {
+///     .event => |ev| { ... },
+///     .extra_ready => {
+///         // Background thread signaled, process messages
+///     },
+/// };
+/// ```
+pub fn pollEventWithExtraFd(self: *Terminal, timeout_ms: ?u32, extra_fd: posix.fd_t) !?PollResult {
+    const result = try self.backend.input_handler.pollEventWithExtraFd(timeout_ms, extra_fd);
+
+    if (result) |outcome| {
+        switch (outcome) {
+            .event => |ev| {
+                switch (ev) {
+                    .resize => |new_size| {
+                        try self.handleResize(new_size);
+                    },
+                    else => {},
+                }
+                return .{ .event = ev };
+            },
+            .extra_ready => return .extra_ready,
+        }
+    }
+
+    return null;
 }
 
 /// Non-blocking event check.
