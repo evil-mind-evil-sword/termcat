@@ -148,12 +148,15 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
         posix.close(p[1]);
     };
 
+    // Use stdin for input when it's a TTY (avoids poll() quirks on /dev/tty on macOS)
+    const input_fd: posix.fd_t = if (posix.isatty(posix.STDIN_FILENO)) posix.STDIN_FILENO else tty_fd;
+
     var self = InputReader{
         .tty_fd = tty_fd,
         .owns_fd = owns_fd,
         .orig_termios = orig_termios,
         .in_raw_mode = false,
-        .input_handler = Input.init(allocator, tty_fd),
+        .input_handler = Input.init(allocator, input_fd),
         .resize_pipe = resize_pipe,
         .resize_slot = resize_slot,
         .allocator = allocator,
