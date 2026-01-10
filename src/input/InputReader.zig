@@ -149,9 +149,7 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
     };
 
     // Use stdin for input when it's a TTY (avoids poll() quirks on /dev/tty on macOS)
-    const stdin_is_tty = posix.isatty(posix.STDIN_FILENO);
-    const input_fd: posix.fd_t = if (stdin_is_tty) posix.STDIN_FILENO else tty_fd;
-    std.debug.print("[InputReader] stdin_is_tty={}, tty_fd={}, input_fd={}\n", .{ stdin_is_tty, tty_fd, input_fd });
+    const input_fd: posix.fd_t = if (posix.isatty(posix.STDIN_FILENO)) posix.STDIN_FILENO else tty_fd;
 
     var self = InputReader{
         .tty_fd = tty_fd,
