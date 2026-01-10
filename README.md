@@ -27,7 +27,7 @@ termcat sits amongst libraries like [termbox2](https://github.com/termbox/termbo
 Add to your `build.zig.zon`:
 ```zig
 .termcat = .{
-    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/tags/v26.1.1.2.tar.gz",
+    .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/heads/main.tar.gz",
     .hash = "...",
 },
 ```
