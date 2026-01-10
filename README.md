@@ -302,7 +302,6 @@ Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
 
 | Feature | termcat | termbox2 | notcurses |
 |---------|---------|----------|-----------|
-| Binary size | 54-140KB | ~20KB | 500KB-2MB |
 | Widgets | 35+ | None | Minimal |
 | Graphics | Kitty, blitting | None | Sixel, Kitty, video |
 | Threading | Single | Single | Multi |
