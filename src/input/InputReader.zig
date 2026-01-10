@@ -44,16 +44,23 @@ pub const Options = struct {
     enable_signals: bool = true,
     /// Install SIGWINCH handler for resize detection.
     install_sigwinch: bool = true,
+    /// Use blocking reads instead of poll/select. Simpler and more compatible,
+    /// but readEvent() will block until input is available.
+    blocking: bool = false,
 };
 
 /// File descriptor for the terminal
 tty_fd: posix.fd_t,
+/// File descriptor for input (may differ from tty_fd)
+input_fd: posix.fd_t,
 /// Whether we own the fd (and should close it on deinit)
 owns_fd: bool,
 /// Original terminal attributes (for restoration)
 orig_termios: posix.termios,
 /// Whether terminal is currently in raw mode
 in_raw_mode: bool,
+/// Whether using blocking reads
+blocking: bool,
 /// Input handler for decoding terminal input
 input_handler: Input,
 /// Self-pipe for resize notifications (read end, write end)
@@ -153,9 +160,11 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
 
     var self = InputReader{
         .tty_fd = tty_fd,
+        .input_fd = input_fd,
         .owns_fd = owns_fd,
         .orig_termios = orig_termios,
         .in_raw_mode = false,
+        .blocking = options.blocking,
         .input_handler = Input.init(allocator, input_fd),
         .resize_pipe = resize_pipe,
         .resize_slot = resize_slot,
@@ -235,9 +244,16 @@ fn enterRawMode(self: *InputReader, enable_signals: bool) !void {
     raw.lflag.IEXTEN = false;
     raw.lflag.ISIG = enable_signals;
 
-    // Control chars: minimum 0 bytes, no timeout (non-blocking reads)
-    raw.cc[@intFromEnum(posix.V.MIN)] = 0;
-    raw.cc[@intFromEnum(posix.V.TIME)] = 0;
+    if (self.blocking) {
+        // Blocking mode: VMIN=1 makes read() block until at least 1 byte available
+        // VTIME=1 (100ms) allows escape sequence disambiguation
+        raw.cc[@intFromEnum(posix.V.MIN)] = 1;
+        raw.cc[@intFromEnum(posix.V.TIME)] = 1; // 100ms timeout for escape sequences
+    } else {
+        // Non-blocking mode: use poll/select to wait for data
+        raw.cc[@intFromEnum(posix.V.MIN)] = 0;
+        raw.cc[@intFromEnum(posix.V.TIME)] = 0;
+    }
 
     try posix.tcsetattr(self.tty_fd, .FLUSH, raw);
     self.in_raw_mode = true;
@@ -296,6 +312,22 @@ pub fn pollEventWithExtraFd(self: *InputReader, timeout_ms: ?u32, extra_fd: posi
 /// Non-blocking event check (equivalent to pollEvent(0)).
 pub fn peekEvent(self: *InputReader) !?Event.Event {
     return self.pollEvent(0);
+}
+
+/// Blocking read for an event. Blocks until input is available.
+/// Requires InputReader to be initialized with blocking=true.
+/// This is simpler and more compatible than poll-based input.
+/// Check for resize events after each call by comparing getSize().
+pub fn readEvent(self: *InputReader) !?Event.Event {
+    // Check for pending resize first
+    if (self.checkResizePending()) {
+        self.size = getTerminalSize(self.tty_fd) catch self.size;
+        return .{ .resize = self.size };
+    }
+
+    // Use blocking read via Input handler
+    // With VMIN=1, VTIME=1, read() will block until at least 1 byte or 100ms timeout
+    return self.input_handler.pollEvent(null);
 }
 
 /// Get the current terminal size.
