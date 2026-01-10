@@ -18,6 +18,7 @@ termcat is inspired by libraries like [termbox2](https://github.com/termbox/term
 | **Input** | Keyboard with modifiers, mouse tracking, bracketed paste, focus events |
 | **Unicode** | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences |
 | **TUI** | 35+ widgets, constraint-based layout, MVU application framework, theming |
+| **CLI** | Comptime command definitions, mode-aware output (JSON/human/quiet), progress indicators |
 | **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+ |
 
 **Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI applications.
@@ -67,10 +68,10 @@ pub fn main() !void {
 termcat is organized in layers. Use whichever level of abstraction fits your needs.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  TUI Framework (termcat.tui)                            │
-│  Widgets, layout, MVU runtime, theming                  │
-├─────────────────────────────────────────────────────────┤
+┌───────────────────────────────┬─────────────────────────┐
+│  TUI Framework (termcat.tui)  │  CLI Tools (termcat.cli)│
+│  Widgets, layout, MVU runtime │  Commands, output, help │
+├───────────────────────────────┴─────────────────────────┤
 │  Terminal                                               │
 │  High-level facade: draw, present, pollEvent            │
 ├─────────────────────────────────────────────────────────┤
@@ -255,6 +256,124 @@ const theme = termcat.tui.Theme{
 };
 ```
 
+## CLI Module
+
+termcat.cli provides infrastructure for building command-line tools without TUI requirements.
+
+### Command Definition
+
+Define commands as Zig structs with comptime metadata:
+
+```zig
+const termcat = @import("termcat");
+const cli = termcat.cli;
+
+pub const PostCommand = struct {
+    topic: []const u8,              // Required positional
+    message: []const u8,            // Required via -m
+    json: bool = false,             // Optional flag
+
+    pub const positional = .{.topic};
+
+    pub const meta = .{
+        .name = "post",
+        .description = "Post a message to a topic",
+    };
+
+    pub const fields = .{
+        .message = .{ .short = 'm', .description = "Message body", .required = true },
+        .json = .{ .description = "Output as JSON" },
+    };
+
+    pub fn run(self: PostCommand, output: *cli.Output) !void {
+        // Implementation
+    }
+};
+
+// Create tagged unions for subcommands
+const Command = cli.Commands(.{
+    .post = PostCommand,
+    .read = ReadCommand,
+});
+```
+
+### Output Formatting
+
+Mode-aware output that adapts to `--json`, `--quiet`, or human-readable:
+
+```zig
+var output = cli.Output.initWithAllocator(allocator);
+output.setModeFromFlags(json, quiet, summary, pretty);
+
+// Outputs JSON or human-readable based on mode
+try output.record(.{ .id = "abc123", .status = "open" });
+
+// Suppressed in JSON/quiet mode
+try output.success("Created successfully");
+
+// Structured errors with hints
+try output.err(cli.CliError.usageError("missing argument")
+    .withContext("--message")
+    .withSuggestion("provide a value with -m <text>"));
+```
+
+### Tables
+
+Column-based table formatting with Unicode support:
+
+```zig
+const IssueTable = cli.Table(&.{
+    .{ .header = "ID", .width = .{ .fixed = 12 } },
+    .{ .header = "Title", .width = .{ .flex = 1.0 }, .truncation = .ellipsis },
+    .{ .header = "Status", .width = .{ .fixed = 10 }, .alignment = .right },
+});
+
+var table = IssueTable.init(writer, terminal_width);
+try table.header();
+try table.row(.{ "abc123", "Fix the bug", "open" });
+```
+
+### Progress Indicators
+
+Spinners and progress bars for long-running operations:
+
+```zig
+var spinner = cli.Spinner.init(&output, "Loading...");
+while (working) {
+    try spinner.tick();
+    std.Thread.sleep(100 * std.time.ns_per_ms);
+}
+try spinner.done("Complete");
+
+var bar = cli.ProgressBar.init(&output, total, "Processing");
+for (items) |_| {
+    try bar.increment(1);
+}
+try bar.finish();
+```
+
+### Parsing Helpers
+
+Zero-allocation argument parsing utilities:
+
+```zig
+const cli = termcat.cli;
+
+var i: usize = 1;
+while (i < args.len) : (i += 1) {
+    const arg = args[i];
+
+    if (cli.matchesFlag(arg, 'm', "message")) {
+        message = cli.nextValue(args, &i) orelse
+            cli.die("--message requires a value", .{});
+    } else if (cli.matchesFlag(arg, 'j', "json")) {
+        json = true;
+    } else if (arg[0] != '-') {
+        positional = arg;
+    }
+}
+```
+
 ## Examples
 
 ```bash
@@ -265,6 +384,7 @@ zig build graphics_demo   # Pixel blitting + Kitty graphics
 zig build kanban          # TUI application example
 zig build log_viewer      # Scrollable log display
 zig build settings        # Configuration UI
+zig build cli_demo        # CLI module demonstration
 ```
 
 ## Building
