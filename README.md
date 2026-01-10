@@ -4,7 +4,7 @@
   <img src="logo.png" alt="termcat logo" width="400">
 </p>
 
-**Cell-based terminal I/O.** Diff rendering, cross-platform, Unicode-aware.
+**Fast and portable terminal I/O.**
 
 termcat sits amongst libraries like [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses). It provides features for real applications—mouse input, graphics protocols, a full widget library—while staying small and portable.
 
