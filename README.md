@@ -1,7 +1,7 @@
 # termcat
 
 <p align="center">
-  <img src="logo.png" alt="termcat logo" width="400">
+  <img src="logo.png" alt="termcat logo" width="250">
 </p>
 
 **Fast and portable terminal I/O.**
