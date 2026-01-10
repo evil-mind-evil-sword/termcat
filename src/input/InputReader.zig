@@ -325,9 +325,9 @@ pub fn readEvent(self: *InputReader) !?Event.Event {
         return .{ .resize = self.size };
     }
 
-    // Use blocking read via Input handler
-    // With VMIN=1, VTIME=1, read() will block until at least 1 byte or 100ms timeout
-    return self.input_handler.pollEvent(null);
+    // Use blocking read - bypasses poll/select entirely
+    // With VMIN=1, VTIME=1 in termios, read() blocks until data or 100ms timeout
+    return self.input_handler.blockingRead();
 }
 
 /// Get the current terminal size.

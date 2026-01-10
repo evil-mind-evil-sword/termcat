@@ -317,6 +317,40 @@ pub fn peekEvent(self: *Input) !?Event.Event {
     return self.pollEvent(0);
 }
 
+/// Blocking read for an event. Blocks until input is available.
+/// Use this when the terminal is configured with VMIN=1 for blocking reads.
+/// Does NOT use poll/select - relies on the terminal's VMIN/VTIME settings.
+pub fn blockingRead(self: *Input) !?Event.Event {
+    // First try to process any buffered data
+    if (try self.processBuffer()) |event| {
+        return event;
+    }
+
+    // Do a blocking read (VMIN=1 in termios makes this block until data)
+    const read_result = try self.readInput();
+    switch (read_result) {
+        .read => |bytes_read| {
+            if (bytes_read > 0) {
+                // Process the new data
+                return try self.processBuffer();
+            }
+            // 0 bytes read with VTIME timeout - check for pending escape
+            if (self.decoder.isPending()) {
+                if (self.decoder.reset()) |event| {
+                    return event;
+                }
+            }
+            return null;
+        },
+        .eof => return null, // VTIME timeout with no data
+        .would_block => return null,
+        .no_space => {
+            // Buffer full, try to process what we have
+            return try self.processBuffer();
+        },
+    }
+}
+
 /// Process buffered input and return an event if complete
 fn processBuffer(self: *Input) !?Event.Event {
     while (self.input_pos < self.input_len) {
