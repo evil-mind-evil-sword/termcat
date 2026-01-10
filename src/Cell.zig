@@ -312,6 +312,16 @@ pub const Attributes = packed struct {
     pub fn eql(self: Attributes, other: Attributes) bool {
         return @as(u8, @bitCast(self)) == @as(u8, @bitCast(other));
     }
+
+    /// Merge two attribute sets with OR semantics (additive).
+    /// Used by Style.merge() to combine attributes without manual field enumeration.
+    pub fn merge(self: Attributes, other: Attributes) Attributes {
+        const a: u8 = @bitCast(self);
+        const b: u8 = @bitCast(other);
+        var result: Attributes = @bitCast(a | b);
+        result._padding = 0;
+        return result;
+    }
 };
 
 /// The default cell used for clear() and out-of-bounds reads

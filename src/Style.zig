@@ -273,6 +273,28 @@ pub fn withDim(self: Style) Style {
     return s;
 }
 
+// Composition methods (for TUI/widget theming)
+
+/// Merge another style on top of this one.
+/// Colors: other takes precedence if non-default.
+/// Attributes: additive OR (cannot unset attributes via merge).
+pub fn merge(self: Style, other: Style) Style {
+    return .{
+        .fg = if (other.fg != .default) other.fg else self.fg,
+        .bg = if (other.bg != .default) other.bg else self.bg,
+        .attrs = self.attrs.merge(other.attrs),
+    };
+}
+
+/// Apply this style to a cell.
+/// Colors: only override if non-default.
+/// Attributes: additive OR with existing cell attributes.
+pub fn applyToCell(self: Style, cell: *Cell) void {
+    if (self.fg != .default) cell.fg = self.fg;
+    if (self.bg != .default) cell.bg = self.bg;
+    cell.attrs = cell.attrs.merge(self.attrs);
+}
+
 // Tests
 test "render basic colors" {
     const testing = std.testing;
@@ -388,4 +410,74 @@ test "default style" {
     const style = Style{};
     const result = try style.render("plain", .true_color, &buf);
     try testing.expectEqualStrings("\x1b[0mplain\x1b[0m", result);
+}
+
+test "merge preserves base when overlay is default" {
+    const base = Style{ .fg = Color.red, .attrs = .{ .bold = true } };
+    const overlay = Style{};
+
+    const merged = base.merge(overlay);
+    try std.testing.expectEqual(Color.red, merged.fg);
+    try std.testing.expect(merged.attrs.bold);
+}
+
+test "merge overlay takes precedence for colors" {
+    const base = Style{ .fg = Color.red, .bg = Color.blue };
+    const overlay = Style{ .fg = Color.green };
+
+    const merged = base.merge(overlay);
+    try std.testing.expectEqual(Color.green, merged.fg);
+    try std.testing.expectEqual(Color.blue, merged.bg); // preserved from base
+}
+
+test "merge combines attributes with OR" {
+    const base = Style{ .attrs = .{ .bold = true, .italic = true } };
+    const overlay = Style{ .attrs = .{ .underline = true } };
+
+    const merged = base.merge(overlay);
+    try std.testing.expect(merged.attrs.bold);
+    try std.testing.expect(merged.attrs.italic);
+    try std.testing.expect(merged.attrs.underline);
+}
+
+test "merge handles dim attribute" {
+    const base = Style{ .attrs = .{ .bold = true } };
+    const overlay = Style{ .attrs = .{ .dim = true } };
+
+    const merged = base.merge(overlay);
+    try std.testing.expect(merged.attrs.bold);
+    try std.testing.expect(merged.attrs.dim);
+}
+
+test "applyToCell updates cell" {
+    var cell = Cell{
+        .char = 'X',
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+        .fg = .default,
+        .bg = .default,
+        .attrs = .{},
+    };
+
+    const style = Style{ .fg = Color.red, .attrs = .{ .bold = true } };
+    style.applyToCell(&cell);
+
+    try std.testing.expectEqual(Color.red, cell.fg);
+    try std.testing.expect(cell.attrs.bold);
+}
+
+test "applyToCell preserves existing attrs" {
+    var cell = Cell{
+        .char = 'X',
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+        .fg = .default,
+        .bg = .default,
+        .attrs = .{ .italic = true },
+    };
+
+    const style = Style{ .attrs = .{ .bold = true, .dim = true } };
+    style.applyToCell(&cell);
+
+    try std.testing.expect(cell.attrs.italic); // preserved
+    try std.testing.expect(cell.attrs.bold); // added
+    try std.testing.expect(cell.attrs.dim); // added
 }

@@ -1,45 +1,12 @@
 //! Theme: Styling system for widgets
 //!
-//! Provides Style and Theme types for consistent widget appearance.
+//! Provides Theme type for consistent widget appearance.
+//! Style is re-exported from the canonical definition in Style.zig.
 
 const Cell = @import("../Cell.zig");
 
-/// A style combining foreground, background, and attributes
-pub const Style = struct {
-    fg: Cell.Color = .default,
-    bg: Cell.Color = .default,
-    attrs: Cell.Attributes = .{},
-
-    /// Merge another style on top of this one (other takes precedence for non-default values)
-    pub fn merge(self: Style, other: Style) Style {
-        return .{
-            .fg = if (other.fg != .default) other.fg else self.fg,
-            .bg = if (other.bg != .default) other.bg else self.bg,
-            .attrs = .{
-                .bold = self.attrs.bold or other.attrs.bold,
-                .italic = self.attrs.italic or other.attrs.italic,
-                .underline = self.attrs.underline or other.attrs.underline,
-                .blink = self.attrs.blink or other.attrs.blink,
-                .reverse = self.attrs.reverse or other.attrs.reverse,
-                .strikethrough = self.attrs.strikethrough or other.attrs.strikethrough,
-            },
-        };
-    }
-
-    /// Apply this style to a cell
-    pub fn applyToCell(self: Style, cell: *Cell) void {
-        if (self.fg != .default) cell.fg = self.fg;
-        if (self.bg != .default) cell.bg = self.bg;
-        cell.attrs = .{
-            .bold = cell.attrs.bold or self.attrs.bold,
-            .italic = cell.attrs.italic or self.attrs.italic,
-            .underline = cell.attrs.underline or self.attrs.underline,
-            .blink = cell.attrs.blink or self.attrs.blink,
-            .reverse = cell.attrs.reverse or self.attrs.reverse,
-            .strikethrough = cell.attrs.strikethrough or self.attrs.strikethrough,
-        };
-    }
-};
+/// Style type for widget theming (re-exported from Style.zig)
+pub const Style = @import("../Style.zig");
 
 /// Theme containing styles for various widget states and semantic purposes
 pub const Theme = struct {
