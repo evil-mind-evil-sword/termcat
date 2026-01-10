@@ -101,6 +101,9 @@ pub const backend = struct {
 // TUI framework layer
 pub const tui = @import("tui/root.zig");
 
+// CLI framework layer
+pub const cli = @import("cli/root.zig");
+
 // Convenience re-exports for backend types
 pub const PosixBackend = backend.PosixBackend;
 pub const WindowsBackend = backend.WindowsBackend;
