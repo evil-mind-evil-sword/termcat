@@ -6,7 +6,7 @@
 
 **Cell-based terminal I/O.** Diff rendering, cross-platform, Unicode-aware.
 
-termcat sits between minimal libraries like [termbox2](https://github.com/termbox/termbox2) and comprehensive ones like [notcurses](https://github.com/dankamongmen/notcurses). It provides enough features for real applications—mouse input, graphics protocols, a full widget library—while staying small enough to understand and maintain.
+termcat sits amongst libraries like [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses). It provides features for real applications—mouse input, graphics protocols, a full widget library—while staying small and portable.
 
 ## Features
 
@@ -150,7 +150,7 @@ const gray = termcat.Color.fromGray(128);
 const attrs: termcat.Attributes = .{ .bold = true, .italic = true };
 ```
 
-Colors automatically downgrade based on terminal capabilities.
+Colors downgrade based on terminal capabilities.
 
 ### Input Events
 
@@ -198,7 +198,7 @@ termcat.PixelBlitter.blit(buffer, x, y, surface, .{
 
 ## TUI Framework
 
-termcat includes a complete widget library for building terminal applications.
+termcat includes a widget library for building terminal applications.
 
 ### Widgets
 
@@ -265,10 +265,7 @@ zig build graphics_demo   # Pixel blitting + Kitty graphics
 zig build kanban          # TUI application example
 zig build log_viewer      # Scrollable log display
 zig build settings        # Configuration UI
-zig build doom            # Doom in the terminal (requires WAD file)
 ```
-
-The Doom demo implements the [doomgeneric](https://github.com/ozkl/doomgeneric) platform hooks using termcat for rendering and input.
 
 ## Building
 
@@ -310,8 +307,6 @@ Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
 | Graphics | Kitty, blitting | None | Sixel, Kitty, video |
 | Threading | Single | Single | Multi |
 | Dependencies | None | None | ffmpeg (optional) |
-
-termcat provides more features than termbox2 while staying smaller and simpler than notcurses.
 
 ## Related
 
