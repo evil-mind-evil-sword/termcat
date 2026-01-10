@@ -19,6 +19,7 @@ pub const Cell = @import("Cell.zig");
 pub const Color = Cell.Color;
 pub const ColorDepth = Cell.ColorDepth;
 pub const Attributes = Cell.Attributes;
+pub const Style = @import("Style.zig");
 pub const Buffer = @import("Buffer.zig");
 pub const Renderer = @import("Renderer.zig");
 pub const Plane = @import("Plane.zig");
