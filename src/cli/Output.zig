@@ -317,9 +317,7 @@ pub const Output = struct {
 
     /// Raw print for custom formatting.
     pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        var buf: [4096]u8 = undefined;
-        const slice = std.fmt.bufPrint(&buf, fmt, args) catch return error.FormatError;
-        try self.file.writeAll(slice);
+        self.file.writer().print(fmt, args) catch return error.FormatError;
     }
 };
 
