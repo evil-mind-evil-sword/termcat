@@ -7,17 +7,6 @@ const std = @import("std");
 const CliError = @import("Error.zig").CliError;
 const writeJsonEscaped = @import("Error.zig").writeJsonEscaped;
 
-/// File-based writer type that doesn't require a buffer.
-const FileWriter = std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, struct {
-    fn write(file: std.fs.File, bytes: []const u8) std.fs.File.WriteError!usize {
-        return file.write(bytes);
-    }
-}.write);
-
-fn fileWriter(file: std.fs.File) FileWriter {
-    return .{ .context = file };
-}
-
 /// Output mode determines formatting strategy.
 pub const Mode = enum {
     /// Human-readable output with formatting.
@@ -211,7 +200,7 @@ pub const Output = struct {
     fn writeHuman(self: *Self, value: anytype) !void {
         const T = @TypeOf(value);
         const type_info = @typeInfo(T);
-        const writer = fileWriter(self.file);
+        const writer = self.file.deprecatedWriter();
 
         if (type_info == .@"struct") {
             // Simple key: value format
@@ -243,20 +232,20 @@ pub const Output = struct {
     /// Print a success message (suppressed in JSON/quiet mode).
     pub fn success(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        const writer = fileWriter(self.file);
+        const writer = self.file.deprecatedWriter();
         writer.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an info message (suppressed in JSON/quiet mode).
     pub fn info(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        const writer = fileWriter(self.file);
+        const writer = self.file.deprecatedWriter();
         writer.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an error.
     pub fn err(self: *Self, error_val: CliError) !void {
-        const stderr = fileWriter(std.fs.File.stderr());
+        const stderr = std.fs.File.stderr().deprecatedWriter();
         var escape_buf: [1024]u8 = undefined;
 
         switch (self.mode) {
@@ -298,7 +287,7 @@ pub const Output = struct {
 
     /// Raw print for custom formatting.
     pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        fileWriter(self.file).print(fmt, args) catch return error.FormatError;
+        self.file.deprecatedWriter().print(fmt, args) catch return error.FormatError;
     }
 };
 
