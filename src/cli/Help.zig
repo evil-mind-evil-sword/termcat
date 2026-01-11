@@ -62,7 +62,7 @@ pub fn generateHelp(comptime T: type, writer: anytype) !void {
                 }
 
                 // Format: "  -s, --long <value>  Description"
-                var buf: [64]u8 = undefined;
+                var buf: [256]u8 = undefined;
                 var pos: usize = 0;
 
                 // Short option
@@ -167,7 +167,7 @@ pub fn generateAppHelp(comptime App: type, writer: anytype) !void {
             inline for (opts_info.@"struct".fields) |field| {
                 const opt = CommandMod.getOptionSpec(GlobalOpts, field);
                 if (!opt.hidden) {
-                    var buf: [64]u8 = undefined;
+                    var buf: [256]u8 = undefined;
                     var pos: usize = 0;
 
                     if (opt.short) |s| {

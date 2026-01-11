@@ -35,15 +35,31 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
         @compileError("parse() requires a struct type");
     }
 
-    // Initialize all fields with defaults
+    // Track which required fields have been set
+    const required_fields = comptime getRequiredFields(T);
+    var fields_set: [required_fields.len]bool = [_]bool{false} ** required_fields.len;
+
+    // Initialize all fields with defaults or safe values
     inline for (type_info.@"struct".fields) |field| {
         if (field.defaultValue()) |default| {
             @field(result, field.name) = default;
+            // Mark as set if it has a default
+            inline for (required_fields, 0..) |req_field, idx| {
+                if (std.mem.eql(u8, req_field, field.name)) {
+                    fields_set[idx] = true;
+                }
+            }
         } else if (@typeInfo(field.type) == .optional) {
             @field(result, field.name) = null;
-        } else {
-            // Required field - leave uninitialized, will be set during parsing
+        } else if (field.type == []const u8) {
+            // Initialize strings to empty to avoid undefined behavior
+            @field(result, field.name) = "";
+        } else if (field.type == bool) {
+            @field(result, field.name) = false;
+        } else if (@typeInfo(field.type) == .int) {
+            @field(result, field.name) = 0;
         }
+        // Other types left undefined - they must be set during parsing
     }
 
     // Count positional args for this type
@@ -74,6 +90,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
             if (setFieldByName(T, &result, opt_name, opt_value)) |err| {
                 return .{ .err = err };
             }
+            markFieldSet(required_fields, &fields_set, opt_name);
             continue;
         }
 
@@ -86,6 +103,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
                 if (setBoolField(T, &result, opt_name, true)) |err| {
                     return .{ .err = err };
                 }
+                markFieldSet(required_fields, &fields_set, opt_name);
             } else {
                 // Needs a value
                 if (i + 1 >= args.len) {
@@ -95,6 +113,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
                 if (setFieldByName(T, &result, opt_name, args[i])) |err| {
                     return .{ .err = err };
                 }
+                markFieldSet(required_fields, &fields_set, opt_name);
             }
             continue;
         }
@@ -110,6 +129,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
                 if (meta.short) |s| {
                     if (s == short) {
                         found_short = true;
+                        markFieldSet(required_fields, &fields_set, field.name);
                         if (field.type == bool) {
                             @field(result, field.name) = true;
                         } else {
@@ -136,6 +156,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
         // Positional argument
         if (positional_index < positional_fields.len) {
             const field_name = positional_fields[positional_index];
+            markFieldSet(required_fields, &fields_set, field_name);
             if (setFieldByName(T, &result, field_name, arg)) |err| {
                 return .{ .err = err };
             }
@@ -145,29 +166,28 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
         }
     }
 
-    // Apply environment variable fallbacks
-    inline for (type_info.@"struct".fields) |field| {
-        const meta = Command.getFieldMeta(T, field.name);
-        if (meta.env) |env_var| {
-            // Only apply if field is still at default/null
-            if (shouldApplyEnvFallback(T, &result, field.name)) {
-                if (getEnvValue(env, env_var)) |env_value| {
-                    if (setFieldByName(T, &result, field.name, env_value)) |err| {
-                        return .{ .err = err };
+    // Apply environment variable fallbacks (only if env is provided)
+    if (@TypeOf(env) != @TypeOf(null)) {
+        inline for (type_info.@"struct".fields) |field| {
+            const meta = Command.getFieldMeta(T, field.name);
+            if (meta.env) |env_var| {
+                // Only apply if field is still at default/null
+                if (shouldApplyEnvFallback(T, &result, field.name)) {
+                    if (getEnvValue(env, env_var)) |env_value| {
+                        if (setFieldByName(T, &result, field.name, env_value)) |err| {
+                            return .{ .err = err };
+                        }
+                        markFieldSet(required_fields, &fields_set, field.name);
                     }
                 }
             }
         }
     }
 
-    // Check required fields
-    inline for (type_info.@"struct".fields) |field| {
-        const meta = Command.getFieldMeta(T, field.name);
-        if (meta.required and field.default_value_ptr == null) {
-            if (@typeInfo(field.type) != .optional) {
-                // Check if still uninitialized (for non-optional required fields)
-                // This is tricky - we rely on the field being set during parsing
-            }
+    // Check required fields were provided
+    inline for (required_fields, 0..) |req_field, idx| {
+        if (!fields_set[idx]) {
+            return .{ .err = CliError.usageError("missing required argument").withContext(req_field) };
         }
     }
 
@@ -185,6 +205,35 @@ fn getPositionalFields(comptime T: type) []const []const u8 {
     }
 
     return fields;
+}
+
+/// Get list of required fields (marked required or non-optional without default).
+fn getRequiredFields(comptime T: type) []const []const u8 {
+    const type_info = @typeInfo(T);
+    comptime var fields: []const []const u8 = &.{};
+
+    inline for (type_info.@"struct".fields) |field| {
+        const meta = Command.getFieldMeta(T, field.name);
+        // A field is required if:
+        // 1. Explicitly marked required in metadata, OR
+        // 2. Non-optional type without a default value
+        const is_optional = @typeInfo(field.type) == .optional;
+        const has_default = field.default_value_ptr != null;
+        if (meta.required or (!is_optional and !has_default)) {
+            fields = fields ++ &[_][]const u8{field.name};
+        }
+    }
+
+    return fields;
+}
+
+/// Mark a field as set in the tracking array.
+fn markFieldSet(comptime required_fields: []const []const u8, fields_set: *[required_fields.len]bool, name: []const u8) void {
+    inline for (required_fields, 0..) |req_field, idx| {
+        if (std.mem.eql(u8, req_field, name)) {
+            fields_set[idx] = true;
+        }
+    }
 }
 
 fn isBoolField(comptime T: type, name: []const u8) bool {
@@ -364,4 +413,44 @@ test "parse help flag" {
 
     const result = parse(TestCmd, &.{"--help"});
     try std.testing.expect(result == .help);
+}
+
+test "missing required field returns error" {
+    const TestCmd = struct {
+        // Required field - no default, non-optional
+        message: []const u8,
+        verbose: bool = false,
+
+        pub const fields = .{
+            .message = .{ .short = 'm', .description = "Message body", .required = true },
+        };
+    };
+
+    // Missing --message should return error
+    const result = parse(TestCmd, &.{"--verbose"});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("missing required argument", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "required field provided succeeds" {
+    const TestCmd = struct {
+        message: []const u8,
+        verbose: bool = false,
+
+        pub const fields = .{
+            .message = .{ .short = 'm', .description = "Message body" },
+        };
+    };
+
+    const result = parse(TestCmd, &.{ "-m", "hello" });
+    switch (result) {
+        .ok => |cmd| {
+            try std.testing.expectEqualStrings("hello", cmd.message);
+        },
+        else => try std.testing.expect(false),
+    }
 }
