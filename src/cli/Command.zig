@@ -141,7 +141,7 @@ fn getValueType(comptime T: type) OptionSpec.ValueType {
     return .string;
 }
 
-fn getDefaultValueName(comptime value_type: OptionSpec.ValueType) []const u8 {
+fn getDefaultValueName(value_type: OptionSpec.ValueType) []const u8 {
     return switch (value_type) {
         .bool => "",
         .string, .optional_string => "<value>",
@@ -155,7 +155,16 @@ pub fn getFieldMeta(comptime T: type, comptime field_name: []const u8) FieldMeta
     if (@hasDecl(T, "fields")) {
         const field_meta = T.fields;
         if (@hasField(@TypeOf(field_meta), field_name)) {
-            return @field(field_meta, field_name);
+            // Coerce anonymous struct literal to FieldMeta
+            const anon = @field(field_meta, field_name);
+            return .{
+                .short = if (@hasField(@TypeOf(anon), "short")) anon.short else null,
+                .description = if (@hasField(@TypeOf(anon), "description")) anon.description else "",
+                .env = if (@hasField(@TypeOf(anon), "env")) anon.env else null,
+                .required = if (@hasField(@TypeOf(anon), "required")) anon.required else false,
+                .value_name = if (@hasField(@TypeOf(anon), "value_name")) anon.value_name else null,
+                .hidden = if (@hasField(@TypeOf(anon), "hidden")) anon.hidden else false,
+            };
         }
     }
     return .{};
@@ -187,7 +196,7 @@ pub fn isPositional(comptime T: type, comptime field_name: []const u8) bool {
 pub fn getOptionSpec(comptime T: type, comptime field: std.builtin.Type.StructField) OptionSpec {
     const meta = getFieldMeta(T, field.name);
     const value_type = getValueType(field.type);
-    const has_default = field.default_value != null;
+    const has_default = field.default_value_ptr != null;
 
     return .{
         .long = field.name,
@@ -209,7 +218,7 @@ pub fn getPositionalSpec(comptime T: type, comptime field: std.builtin.Type.Stru
 
     return .{
         .name = field.name,
-        .required = !is_optional and field.default_value == null,
+        .required = !is_optional and field.default_value_ptr == null,
         .description = meta.description,
         .value_name = meta.value_name orelse ("<" ++ field.name ++ ">"),
     };

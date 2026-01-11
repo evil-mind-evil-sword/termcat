@@ -53,6 +53,19 @@ pub const SpinnerStyle = Progress.SpinnerStyle;
 pub const ProgressBar = Progress.ProgressBar;
 pub const StatusLine = Progress.StatusLine;
 
+// Argument parsing
+pub const Parser = @import("Parser.zig");
+pub const parse = Parser.parse;
+pub const parseWithEnv = Parser.parseWithEnv;
+pub const ParseResult = Parser.ParseResult;
+
+// Help generation
+pub const Help = @import("Help.zig");
+pub const generateHelp = Help.generateHelp;
+pub const generateAppHelp = Help.generateAppHelp;
+pub const printHelp = Help.printHelp;
+pub const printAppHelp = Help.printAppHelp;
+
 /// Extract common output flags from a command struct.
 /// Convenience for commands that follow the jwz/tissue pattern.
 pub fn getOutputFlags(cmd: anytype) struct { json: bool, quiet: bool, summary: bool, pretty: bool } {
