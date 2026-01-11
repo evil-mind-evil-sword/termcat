@@ -43,10 +43,14 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
     inline for (type_info.@"struct".fields) |field| {
         if (field.defaultValue()) |default| {
             @field(result, field.name) = default;
-            // Mark as set if it has a default
-            inline for (required_fields, 0..) |req_field, idx| {
-                if (std.mem.eql(u8, req_field, field.name)) {
-                    fields_set[idx] = true;
+            // Mark as set if it has a default, UNLESS meta.required is true
+            // (meta.required means user must explicitly provide, even if there's a default)
+            const meta = CommandMod.getFieldMeta(T, field.name);
+            if (!meta.required) {
+                inline for (required_fields, 0..) |req_field, idx| {
+                    if (std.mem.eql(u8, req_field, field.name)) {
+                        fields_set[idx] = true;
+                    }
                 }
             }
         } else if (@typeInfo(field.type) == .optional) {
@@ -153,6 +157,12 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
             continue;
         }
 
+        // Combined short options (e.g., -abc) or short option with inline value (e.g., -uhttp://x)
+        // are not supported - give a clear error
+        if (arg.len > 2 and arg[0] == '-' and arg[1] != '-') {
+            return .{ .err = CliError.usageError("combined short options (-abc) and inline values (-uVALUE) not supported; use -a -b -c or -u VALUE").withContext(arg) };
+        }
+
         // Positional argument
         if (positional_index < positional_fields.len) {
             const field_name = positional_fields[positional_index];
@@ -208,8 +218,11 @@ fn getPositionalFields(comptime T: type) []const []const u8 {
 }
 
 /// Get list of required fields (marked required or non-optional without default).
+/// Works for both command structs and global option structs.
 fn getRequiredFields(comptime T: type) []const []const u8 {
     const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return &.{};
+
     comptime var fields: []const []const u8 = &.{};
 
     inline for (type_info.@"struct".fields) |field| {
@@ -504,8 +517,8 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
     var global: GlobalOptions = undefined;
     const global_type_info = @typeInfo(GlobalOptions);
 
-    // Track required global options
-    const required_globals = comptime getRequiredGlobalFields(GlobalOptions);
+    // Track required global options (reuse getRequiredFields for consistency)
+    const required_globals = comptime getRequiredFields(GlobalOptions);
     var globals_set: [required_globals.len]bool = [_]bool{false} ** required_globals.len;
 
     // Initialize global options with defaults
@@ -513,10 +526,14 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
         inline for (global_type_info.@"struct".fields) |field| {
             if (field.defaultValue()) |default| {
                 @field(global, field.name) = default;
-                // Mark as set if it has a default
-                inline for (required_globals, 0..) |req_field, idx| {
-                    if (std.mem.eql(u8, req_field, field.name)) {
-                        globals_set[idx] = true;
+                // Mark as set if it has a default, UNLESS meta.required is true
+                // (meta.required means user must explicitly provide, even if there's a default)
+                const meta = CommandMod.getFieldMeta(GlobalOptions, field.name);
+                if (!meta.required) {
+                    inline for (required_globals, 0..) |req_field, idx| {
+                        if (std.mem.eql(u8, req_field, field.name)) {
+                            globals_set[idx] = true;
+                        }
                     }
                 }
             } else if (@typeInfo(field.type) == .optional) {
@@ -561,7 +578,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
             if (setGlobalField(GlobalOptions, &global, opt_name, opt_value)) |err| {
                 return .{ .err = err };
             }
-            markGlobalFieldSet(required_globals, &globals_set, opt_name);
+            markFieldSet(required_globals, &globals_set, opt_name);
             continue;
         }
 
@@ -573,7 +590,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                 if (setGlobalBoolField(GlobalOptions, &global, opt_name, true)) |err| {
                     return .{ .err = err };
                 }
-                markGlobalFieldSet(required_globals, &globals_set, opt_name);
+                markFieldSet(required_globals, &globals_set, opt_name);
             } else if (isGlobalField(GlobalOptions, opt_name)) {
                 // Needs a value
                 if (i + 1 >= args.len) {
@@ -583,7 +600,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                 if (setGlobalField(GlobalOptions, &global, opt_name, args[i])) |err| {
                     return .{ .err = err };
                 }
-                markGlobalFieldSet(required_globals, &globals_set, opt_name);
+                markFieldSet(required_globals, &globals_set, opt_name);
             } else {
                 // Unknown global option - error (don't let it fall through to command)
                 return .{ .err = CliError.usageError("unknown global option").withContext(arg) };
@@ -602,7 +619,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                     if (meta.short) |s| {
                         if (s == short) {
                             found = true;
-                            markGlobalFieldSet(required_globals, &globals_set, field.name);
+                            markFieldSet(required_globals, &globals_set, field.name);
                             if (field.type == bool) {
                                 @field(global, field.name) = true;
                             } else {
@@ -627,34 +644,37 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
             continue;
         }
 
-        // Combined short options (e.g., -abc) or short option with value (e.g., -uhttp://x)
+        // Combined short options (e.g., -abc) or short option with inline value (e.g., -uhttp://x)
         // are not supported - give a clear error
         if (arg.len > 2 and arg[0] == '-' and arg[1] != '-') {
-            return .{ .err = CliError.usageError("combined short options not supported; use separate flags").withContext(arg) };
+            return .{ .err = CliError.usageError("combined short options (-abc) and inline values (-uVALUE) not supported; use -a -b -c or -u VALUE").withContext(arg) };
         }
 
         // Non-option argument - this is the command name
         break;
     }
 
-    // Validate required global options were provided
-    inline for (required_globals, 0..) |req_field, idx| {
-        if (!globals_set[idx]) {
-            return .{ .err = CliError.usageError("missing required global option").withContext(req_field) };
-        }
-    }
-
     // Phase 2: Identify and dispatch to command
     if (i >= args.len) {
+        // No command provided - check if help/version was requested elsewhere
+        // or return missing command error
         return .{ .err = CliError.usageError("missing command") };
     }
 
     const cmd_name = args[i];
     const cmd_args = args[i + 1 ..];
 
-    // Check for command-specific help
+    // Check for command-specific help BEFORE validating required globals
+    // This allows `app cmd --help` to work without providing required globals
     if (cmd_args.len > 0 and (std.mem.eql(u8, cmd_args[0], "-h") or std.mem.eql(u8, cmd_args[0], "--help"))) {
         return .{ .command_help = cmd_name };
+    }
+
+    // Validate required global options were provided (after help check)
+    inline for (required_globals, 0..) |req_field, idx| {
+        if (!globals_set[idx]) {
+            return .{ .err = CliError.usageError("missing required global option").withContext("--" ++ req_field) };
+        }
     }
 
     // Match command name against union fields
@@ -757,34 +777,6 @@ fn setGlobalBoolField(comptime GlobalOptions: type, global: *GlobalOptions, name
         }
     }
     return CliError.usageError("unknown global flag").withContext(name);
-}
-
-/// Get list of required global option fields.
-fn getRequiredGlobalFields(comptime GlobalOptions: type) []const []const u8 {
-    const type_info = @typeInfo(GlobalOptions);
-    if (type_info != .@"struct") return &.{};
-
-    comptime var fields: []const []const u8 = &.{};
-
-    inline for (type_info.@"struct".fields) |field| {
-        const meta = CommandMod.getFieldMeta(GlobalOptions, field.name);
-        const is_optional = @typeInfo(field.type) == .optional;
-        const has_default = field.default_value_ptr != null;
-        if (meta.required or (!is_optional and !has_default)) {
-            fields = fields ++ &[_][]const u8{field.name};
-        }
-    }
-
-    return fields;
-}
-
-/// Mark a global field as set in the tracking array.
-fn markGlobalFieldSet(comptime required_globals: []const []const u8, globals_set: *[required_globals.len]bool, name: []const u8) void {
-    inline for (required_globals, 0..) |req_field, idx| {
-        if (std.mem.eql(u8, req_field, name)) {
-            globals_set[idx] = true;
-        }
-    }
 }
 
 test "parseApp basic" {
@@ -980,6 +972,90 @@ test "parseApp combined short options error" {
 
     // Combined short options should give clear error
     const result = parseApp(TestApp, &.{ "-vd", "health" });
+    switch (result) {
+        .err => |err| {
+            try std.testing.expect(std.mem.indexOf(u8, err.message, "combined short options") != null);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp command help bypasses required globals" {
+    const HealthCmd = struct {
+        verbose: bool = false,
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            // Required - no default, non-optional
+            url: []const u8,
+            pub const fields = .{
+                .url = .{ .description = "Server URL" },
+            };
+        };
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    // `app health --help` should work without providing required --url
+    const result = parseApp(TestApp, &.{ "health", "--help" });
+    switch (result) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("health", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp metadata-required optional field" {
+    const HealthCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            // Optional type with null default, but marked required via metadata
+            // This tests the meta.required path, not the type-based path
+            token: ?[]const u8 = null,
+            pub const fields = .{
+                .token = .{ .description = "Auth token", .required = true },
+            };
+        };
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    // Missing --token (marked required via metadata) should fail
+    const result = parseApp(TestApp, &.{"health"});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("missing required global option", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Providing --token should succeed
+    const result2 = parseApp(TestApp, &.{ "--token", "secret", "health" });
+    switch (result2) {
+        .ok => |r| {
+            try std.testing.expectEqualStrings("secret", r.global.token.?);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parse combined short options error" {
+    const TestCmd = struct {
+        verbose: bool = false,
+        debug: bool = false,
+        pub const fields = .{
+            .verbose = .{ .short = 'v' },
+            .debug = .{ .short = 'd' },
+        };
+    };
+
+    // Combined short options should give clear error
+    const result = parse(TestCmd, &.{"-vd"});
     switch (result) {
         .err => |err| {
             try std.testing.expect(std.mem.indexOf(u8, err.message, "combined short options") != null);
