@@ -7,6 +7,17 @@ const std = @import("std");
 const CliError = @import("Error.zig").CliError;
 const writeJsonEscaped = @import("Error.zig").writeJsonEscaped;
 
+/// File-based writer type that doesn't require a buffer.
+const FileWriter = std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, struct {
+    fn write(file: std.fs.File, bytes: []const u8) std.fs.File.WriteError!usize {
+        return file.write(bytes);
+    }
+}.write);
+
+fn fileWriter(file: std.fs.File) FileWriter {
+    return .{ .context = file };
+}
+
 /// Output mode determines formatting strategy.
 pub const Mode = enum {
     /// Human-readable output with formatting.
@@ -200,112 +211,82 @@ pub const Output = struct {
     fn writeHuman(self: *Self, value: anytype) !void {
         const T = @TypeOf(value);
         const type_info = @typeInfo(T);
-
-        var buf: [4096]u8 = undefined;
-        var pos: usize = 0;
+        const writer = fileWriter(self.file);
 
         if (type_info == .@"struct") {
             // Simple key: value format
             inline for (type_info.@"struct".fields, 0..) |field, i| {
                 if (i > 0) {
-                    if (pos + 2 <= buf.len) {
-                        buf[pos] = ' ';
-                        buf[pos + 1] = ' ';
-                        pos += 2;
-                    }
+                    writer.writeAll("  ") catch return error.FormatError;
                 }
                 const field_value = @field(value, field.name);
                 const FieldType = @TypeOf(field_value);
                 // Use {s} for string types, {d} for integers, {any} fallback
-                const slice = if (FieldType == []const u8 or FieldType == []u8)
-                    std.fmt.bufPrint(buf[pos..], "{s}: {s}", .{ field.name, field_value }) catch break
-                else if (@typeInfo(FieldType) == .int)
-                    std.fmt.bufPrint(buf[pos..], "{s}: {d}", .{ field.name, field_value }) catch break
-                else
-                    std.fmt.bufPrint(buf[pos..], "{s}: {any}", .{ field.name, field_value }) catch break;
-                pos += slice.len;
+                if (FieldType == []const u8 or FieldType == []u8) {
+                    writer.print("{s}: {s}", .{ field.name, field_value }) catch return error.FormatError;
+                } else if (@typeInfo(FieldType) == .int) {
+                    writer.print("{s}: {d}", .{ field.name, field_value }) catch return error.FormatError;
+                } else {
+                    writer.print("{s}: {any}", .{ field.name, field_value }) catch return error.FormatError;
+                }
             }
-            if (pos < buf.len) {
-                buf[pos] = '\n';
-                pos += 1;
-            }
-            try self.file.writeAll(buf[0..pos]);
+            writer.writeAll("\n") catch return error.FormatError;
         } else if (T == []const u8 or T == []u8) {
-            const slice = std.fmt.bufPrint(&buf, "{s}\n", .{value}) catch return error.FormatError;
-            try self.file.writeAll(slice);
+            writer.print("{s}\n", .{value}) catch return error.FormatError;
         } else if (type_info == .int) {
-            const slice = std.fmt.bufPrint(&buf, "{d}\n", .{value}) catch return error.FormatError;
-            try self.file.writeAll(slice);
+            writer.print("{d}\n", .{value}) catch return error.FormatError;
         } else {
-            const slice = std.fmt.bufPrint(&buf, "{any}\n", .{value}) catch return error.FormatError;
-            try self.file.writeAll(slice);
+            writer.print("{any}\n", .{value}) catch return error.FormatError;
         }
     }
 
     /// Print a success message (suppressed in JSON/quiet mode).
     pub fn success(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        var buf: [4096]u8 = undefined;
-        const slice = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return error.FormatError;
-        try self.file.writeAll(slice);
+        const writer = fileWriter(self.file);
+        writer.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an info message (suppressed in JSON/quiet mode).
     pub fn info(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        var buf: [4096]u8 = undefined;
-        const slice = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return error.FormatError;
-        try self.file.writeAll(slice);
+        const writer = fileWriter(self.file);
+        writer.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an error.
     pub fn err(self: *Self, error_val: CliError) !void {
-        const stderr_file = std.fs.File.stderr();
-        var buf: [4096]u8 = undefined;
+        const stderr = fileWriter(std.fs.File.stderr());
         var escape_buf: [1024]u8 = undefined;
 
         switch (self.mode) {
             .json, .json_pretty => {
                 // Format JSON error with proper escaping
-                var pos: usize = 0;
                 const escaped_msg = writeJsonEscaped(&escape_buf, error_val.message);
-                const header = std.fmt.bufPrint(buf[pos..], "{{\"error\":\"{s}\",\"code\":{d}", .{
+                stderr.print("{{\"error\":\"{s}\",\"code\":{d}", .{
                     escaped_msg,
                     @intFromEnum(error_val.code),
                 }) catch return error.FormatError;
-                pos += header.len;
 
                 if (error_val.context) |ctx| {
                     const escaped_ctx = writeJsonEscaped(&escape_buf, ctx);
-                    const ctx_part = std.fmt.bufPrint(buf[pos..], ",\"context\":\"{s}\"", .{escaped_ctx}) catch return error.FormatError;
-                    pos += ctx_part.len;
+                    stderr.print(",\"context\":\"{s}\"", .{escaped_ctx}) catch return error.FormatError;
                 }
                 if (error_val.suggestion) |sug| {
                     const escaped_sug = writeJsonEscaped(&escape_buf, sug);
-                    const sug_part = std.fmt.bufPrint(buf[pos..], ",\"suggestion\":\"{s}\"", .{escaped_sug}) catch return error.FormatError;
-                    pos += sug_part.len;
+                    stderr.print(",\"suggestion\":\"{s}\"", .{escaped_sug}) catch return error.FormatError;
                 }
-                if (pos + 2 <= buf.len) {
-                    buf[pos] = '}';
-                    buf[pos + 1] = '\n';
-                    pos += 2;
-                }
-                try stderr_file.writeAll(buf[0..pos]);
+                stderr.writeAll("}\n") catch return error.FormatError;
             },
             else => {
-                var pos: usize = 0;
-                const err_msg = std.fmt.bufPrint(buf[pos..], "error: {s}\n", .{error_val.message}) catch return error.FormatError;
-                pos += err_msg.len;
+                stderr.print("error: {s}\n", .{error_val.message}) catch return error.FormatError;
 
                 if (error_val.context) |ctx| {
-                    const ctx_part = std.fmt.bufPrint(buf[pos..], "       {s}\n", .{ctx}) catch return error.FormatError;
-                    pos += ctx_part.len;
+                    stderr.print("       {s}\n", .{ctx}) catch return error.FormatError;
                 }
                 if (error_val.suggestion) |sug| {
-                    const sug_part = std.fmt.bufPrint(buf[pos..], "\nhint: {s}\n", .{sug}) catch return error.FormatError;
-                    pos += sug_part.len;
+                    stderr.print("\nhint: {s}\n", .{sug}) catch return error.FormatError;
                 }
-                try stderr_file.writeAll(buf[0..pos]);
             },
         }
     }
@@ -317,7 +298,7 @@ pub const Output = struct {
 
     /// Raw print for custom formatting.
     pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        self.file.writer().print(fmt, args) catch return error.FormatError;
+        fileWriter(self.file).print(fmt, args) catch return error.FormatError;
     }
 };
 
