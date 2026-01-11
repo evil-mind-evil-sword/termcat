@@ -273,23 +273,62 @@ pub fn Commands(comptime cmd_defs: anytype) type {
     });
 }
 
-/// Create a subcommand group.
+/// Create a subcommand group with optional metadata.
 ///
-/// Returns a Commands union directly. In parseApp, subcommand groups are
-/// detected by checking if the field type is a union (regular commands are structs).
+/// Can be called two ways:
 ///
-/// Example:
+/// 1. Simple form (just subcommands):
 /// ```zig
-/// pub const Command = Commands(.{
-///     .health = HealthCmd,         // struct - regular command
-///     .bib = Subcommand(.{         // union - subcommand group
+/// .bib = Subcommand(.{
+///     .add = BibAddCmd,
+///     .remove = BibRemoveCmd,
+/// }),
+/// ```
+///
+/// 2. With metadata:
+/// ```zig
+/// .bib = Subcommand(.{
+///     .meta = .{
+///         .name = "bib",
+///         .description = "Manage bibliography entries",
+///     },
+///     .commands = .{
 ///         .add = BibAddCmd,
 ///         .remove = BibRemoveCmd,
-///     }),
-/// });
+///     },
+/// }),
 /// ```
-pub fn Subcommand(comptime sub_defs: anytype) type {
-    return Commands(sub_defs);
+pub fn Subcommand(comptime config: anytype) type {
+    const ConfigType = @TypeOf(config);
+    const has_commands_field = @hasField(ConfigType, "commands");
+
+    // Extract commands and optional metadata
+    const cmd_defs = if (has_commands_field) config.commands else config;
+    const CmdUnion = Commands(cmd_defs);
+
+    return struct {
+        /// The inner commands union type.
+        pub const commands = CmdUnion;
+
+        /// Group metadata (name, description, etc.).
+        pub const meta: CommandMeta = if (@hasField(ConfigType, "meta")) blk: {
+            const m = config.meta;
+            break :blk .{
+                .name = if (@hasField(@TypeOf(m), "name")) m.name else "",
+                .aliases = if (@hasField(@TypeOf(m), "aliases")) m.aliases else &.{},
+                .description = if (@hasField(@TypeOf(m), "description")) m.description else "",
+                .long_description = if (@hasField(@TypeOf(m), "long_description")) m.long_description else null,
+                .examples = if (@hasField(@TypeOf(m), "examples")) m.examples else &.{},
+                .hidden = if (@hasField(@TypeOf(m), "hidden")) m.hidden else false,
+            };
+        } else .{ .name = "" };
+
+        /// Marker for subcommand group detection.
+        pub const is_subcommand_group = true;
+
+        /// The actual command value.
+        value: CmdUnion,
+    };
 }
 
 test "getCommandMeta" {

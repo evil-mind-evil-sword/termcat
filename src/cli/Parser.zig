@@ -687,16 +687,18 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
 
     inline for (union_info.@"union".fields) |field| {
         if (std.mem.eql(u8, field.name, cmd_name)) {
-            // Check if this is a subcommand group (union type = subcommand, struct type = command)
-            const field_type_info = @typeInfo(field.type);
-            if (field_type_info == .@"union") {
-                // Parse nested subcommand
-                const sub_result = parseSubcommandGroup(field.type, cmd_name, cmd_args);
+            // Check if this is a subcommand group (has is_subcommand_group marker)
+            if (@hasDecl(field.type, "is_subcommand_group") and field.type.is_subcommand_group) {
+                // Parse nested subcommand using the inner commands union
+                const sub_result = parseSubcommandGroup(field.type.commands, cmd_name, cmd_args);
                 switch (sub_result) {
                     .ok => |sub| {
+                        // Wrap in the Subcommand struct
+                        var wrapper: field.type = undefined;
+                        wrapper.value = sub;
                         return .{ .ok = .{
                             .global = global,
-                            .command = @unionInit(CommandUnion, field.name, sub),
+                            .command = @unionInit(CommandUnion, field.name, wrapper),
                         } };
                     },
                     .err => |err| return .{ .err = err },
@@ -721,9 +723,8 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
             }
         }
 
-        // Check aliases (only for struct command types, not subcommand groups)
-        const field_type_info = @typeInfo(field.type);
-        if (field_type_info == .@"struct") {
+        // Check aliases (only for regular command types, not subcommand groups)
+        if (!@hasDecl(field.type, "is_subcommand_group")) {
             const cmd_meta = CommandMod.getCommandMeta(field.type);
             for (cmd_meta.aliases) |alias| {
                 if (std.mem.eql(u8, alias, cmd_name)) {
@@ -1213,8 +1214,8 @@ test "parseApp nested subcommand group" {
     switch (result1) {
         .ok => |r| {
             try std.testing.expect(r.command == .bib);
-            try std.testing.expect(r.command.bib == .add);
-            try std.testing.expectEqualStrings("refs.bib", r.command.bib.add.file);
+            try std.testing.expect(r.command.bib.value == .add);
+            try std.testing.expectEqualStrings("refs.bib", r.command.bib.value.add.file);
         },
         else => try std.testing.expect(false),
     }
@@ -1224,8 +1225,8 @@ test "parseApp nested subcommand group" {
     switch (result2) {
         .ok => |r| {
             try std.testing.expect(r.command == .bib);
-            try std.testing.expect(r.command.bib == .remove);
-            try std.testing.expectEqualStrings("key123", r.command.bib.remove.key);
+            try std.testing.expect(r.command.bib.value == .remove);
+            try std.testing.expectEqualStrings("key123", r.command.bib.value.remove.key);
         },
         else => try std.testing.expect(false),
     }
@@ -1314,4 +1315,42 @@ test "parseApp nested subcommand help" {
         },
         else => try std.testing.expect(false),
     }
+}
+
+test "parseApp subcommand group with metadata" {
+    const BibAddCmd = struct {
+        file: []const u8 = "",
+        pub const positional = .{.file};
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .meta = .{
+                    .name = "bib",
+                    .description = "Manage bibliography entries",
+                },
+                .commands = .{
+                    .add = BibAddCmd,
+                },
+            }),
+        });
+    };
+
+    // Test parsing still works with metadata form
+    const result = parseApp(TestApp, &.{ "bib", "add", "refs.bib" });
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .bib);
+            try std.testing.expect(r.command.bib.value == .add);
+            try std.testing.expectEqualStrings("refs.bib", r.command.bib.value.add.file);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Verify metadata is accessible at comptime
+    const BibSubgroup = @TypeOf(@as(TestApp.Command, undefined).bib);
+    try std.testing.expectEqualStrings("bib", BibSubgroup.meta.name);
+    try std.testing.expectEqualStrings("Manage bibliography entries", BibSubgroup.meta.description);
 }
