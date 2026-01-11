@@ -9,6 +9,34 @@ const Error = @import("Error.zig");
 const CliError = Error.CliError;
 const ExitCode = Error.ExitCode;
 
+/// Check if a CLI option name matches a field name.
+/// Handles hyphen-to-underscore normalization: "--min-year" matches field "min_year".
+fn optionMatchesField(opt_name: []const u8, comptime field_name: []const u8) bool {
+    if (opt_name.len != field_name.len) return false;
+    for (opt_name, field_name) |opt_c, field_c| {
+        const normalized = if (opt_c == '-') '_' else opt_c;
+        if (normalized != field_c) return false;
+    }
+    return true;
+}
+
+/// Convert a comptime field name to CLI format (underscores to hyphens) with "--" prefix.
+/// Returns a comptime-known string for use in error messages and string concatenation.
+fn toCliOption(comptime field_name: []const u8) *const [2 + field_name.len]u8 {
+    const S = struct {
+        const buf = blk: {
+            var b: [2 + field_name.len]u8 = undefined;
+            b[0] = '-';
+            b[1] = '-';
+            for (field_name, 0..) |c, i| {
+                b[2 + i] = if (c == '_') '-' else c;
+            }
+            break :blk b;
+        };
+    };
+    return &S.buf;
+}
+
 /// Result of parsing arguments.
 pub fn ParseResult(comptime T: type) type {
     return union(enum) {
@@ -198,7 +226,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
     // Check required fields were provided
     inline for (required_fields, 0..) |req_field, idx| {
         if (!fields_set[idx]) {
-            return .{ .err = CliError.usageError("missing required argument").withContext(req_field) };
+            return .{ .err = CliError.usageError("missing required argument").withContext(toCliOption(req_field)) };
         }
     }
 
@@ -244,7 +272,7 @@ fn getRequiredFields(comptime T: type) []const []const u8 {
 /// Mark a field as set in the tracking array.
 fn markFieldSet(comptime required_fields: []const []const u8, fields_set: *[required_fields.len]bool, name: []const u8) void {
     inline for (required_fields, 0..) |req_field, idx| {
-        if (std.mem.eql(u8, req_field, name)) {
+        if (optionMatchesField(name, req_field)) {
             fields_set[idx] = true;
         }
     }
@@ -253,7 +281,7 @@ fn markFieldSet(comptime required_fields: []const []const u8, fields_set: *[requ
 fn isBoolField(comptime T: type, name: []const u8) bool {
     const type_info = @typeInfo(T);
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name)) {
+        if (optionMatchesField(name, field.name)) {
             return field.type == bool;
         }
     }
@@ -284,27 +312,27 @@ fn getFieldNameByShort(comptime T: type, short: u8) ?[]const u8 {
 fn setFieldByName(comptime T: type, result: *T, name: []const u8, value: []const u8) ?CliError {
     const type_info = @typeInfo(T);
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name)) {
+        if (optionMatchesField(name, field.name)) {
             if (parseValue(field.type, value)) |parsed| {
                 @field(result, field.name) = parsed;
                 return null;
             } else |_| {
-                return CliError.usageError( "Invalid value for --" ++ field.name).withContext(value);
+                return CliError.usageError("Invalid value for " ++ toCliOption(field.name)).withContext(value);
             }
         }
     }
-    return CliError.usageError( "Unknown option").withContext(name);
+    return CliError.usageError("Unknown option").withContext(name);
 }
 
 fn setBoolField(comptime T: type, result: *T, name: []const u8, value: bool) ?CliError {
     const type_info = @typeInfo(T);
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name) and field.type == bool) {
+        if (optionMatchesField(name, field.name) and field.type == bool) {
             @field(result, field.name) = value;
             return null;
         }
     }
-    return CliError.usageError( "Unknown flag").withContext(name);
+    return CliError.usageError("Unknown flag").withContext(name);
 }
 
 fn setBoolFieldByName(comptime T: type, result: *T, comptime name: []const u8, value: bool) ?CliError {
@@ -666,19 +694,6 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
     const cmd_name = args[i];
     const cmd_args = args[i + 1 ..];
 
-    // Check for command-specific help BEFORE validating required globals
-    // This allows `app cmd --help` to work without providing required globals
-    if (cmd_args.len > 0 and (std.mem.eql(u8, cmd_args[0], "-h") or std.mem.eql(u8, cmd_args[0], "--help"))) {
-        return .{ .command_help = cmd_name };
-    }
-
-    // Validate required global options were provided (after help check)
-    inline for (required_globals, 0..) |req_field, idx| {
-        if (!globals_set[idx]) {
-            return .{ .err = CliError.usageError("missing required global option").withContext("--" ++ req_field) };
-        }
-    }
-
     // Match command name against union fields
     const union_info = @typeInfo(CommandUnion);
     if (union_info != .@"union") {
@@ -689,10 +704,16 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
         if (std.mem.eql(u8, field.name, cmd_name)) {
             // Check if this is a subcommand group (has is_subcommand_group marker)
             if (@hasDecl(field.type, "is_subcommand_group") and field.type.is_subcommand_group) {
-                // Parse nested subcommand using the inner commands union
-                const sub_result = parseSubcommandGroup(field.type.commands, cmd_name, cmd_args);
+                // For subcommand groups, parse first to discover nested help requests
+                const sub_result = parseSubcommandGroup(field.type.commands, field.name, cmd_args);
                 switch (sub_result) {
                     .ok => |sub| {
+                        // Validate required globals for successful parse
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
                         // Wrap in the Subcommand struct
                         var wrapper: field.type = undefined;
                         wrapper.value = sub;
@@ -701,23 +722,46 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                             .command = @unionInit(CommandUnion, field.name, wrapper),
                         } };
                     },
-                    .err => |err| return .{ .err = err },
-                    .help => return .{ .command_help = cmd_name },
-                    .version => return .version,
+                    .err => |err| {
+                        // Validate globals for error cases too
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        return .{ .err = err };
+                    },
+                    // Help and command_help bypass globals validation
+                    .help => return .{ .command_help = field.name },
                     .command_help => |sub_cmd| return .{ .command_help = sub_cmd },
+                    .version => return .version,
                 }
             } else {
-                // Parse command-specific arguments
+                // Regular command - parse first to discover help/version anywhere in args
                 const cmd_result = parse(field.type, cmd_args);
                 switch (cmd_result) {
                     .ok => |cmd| {
+                        // Validate required globals only for successful parse
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
                         return .{ .ok = .{
                             .global = global,
                             .command = @unionInit(CommandUnion, field.name, cmd),
                         } };
                     },
-                    .err => |err| return .{ .err = err },
-                    .help => return .{ .command_help = cmd_name },
+                    .err => |err| {
+                        // Validate globals for error cases too
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        return .{ .err = err };
+                    },
+                    .help => return .{ .command_help = field.name },
                     .version => return .version,
                 }
             }
@@ -728,15 +772,30 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
             const cmd_meta = CommandMod.getCommandMeta(field.type);
             for (cmd_meta.aliases) |alias| {
                 if (std.mem.eql(u8, alias, cmd_name)) {
+                    // Parse first to discover help/version
                     const cmd_result = parse(field.type, cmd_args);
                     switch (cmd_result) {
                         .ok => |cmd| {
+                            // Validate required globals only for successful parse
+                            inline for (required_globals, 0..) |req_field, idx| {
+                                if (!globals_set[idx]) {
+                                    return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                                }
+                            }
                             return .{ .ok = .{
                                 .global = global,
                                 .command = @unionInit(CommandUnion, field.name, cmd),
                             } };
                         },
-                        .err => |err| return .{ .err = err },
+                        .err => |err| {
+                            // Validate globals for error cases too
+                            inline for (required_globals, 0..) |req_field, idx| {
+                                if (!globals_set[idx]) {
+                                    return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                                }
+                            }
+                            return .{ .err = err };
+                        },
                         .help => return .{ .command_help = field.name },
                         .version => return .version,
                     }
@@ -785,21 +844,25 @@ fn parseSubcommandGroup(
     const sub_cmd_name = args[0];
     const sub_cmd_args = args[1..];
 
-    // Check for subcommand-specific help
-    if (sub_cmd_args.len > 0 and (std.mem.eql(u8, sub_cmd_args[0], "-h") or std.mem.eql(u8, sub_cmd_args[0], "--help"))) {
-        return .{ .command_help = sub_cmd_name };
-    }
+    // Check if this is a help request for a subcommand
+    const is_help_request = sub_cmd_args.len > 0 and
+        (std.mem.eql(u8, sub_cmd_args[0], "-h") or std.mem.eql(u8, sub_cmd_args[0], "--help"));
 
-    // Match subcommand name
+    // Match subcommand name (validates it exists before returning help)
     inline for (sub_union_info.@"union".fields) |field| {
         if (std.mem.eql(u8, field.name, sub_cmd_name)) {
+            // Return help for valid subcommand
+            if (is_help_request) {
+                return .{ .command_help = field.name };
+            }
+
             const cmd_result = parse(field.type, sub_cmd_args);
             switch (cmd_result) {
                 .ok => |cmd| {
                     return .{ .ok = @unionInit(SubCommands, field.name, cmd) };
                 },
                 .err => |err| return .{ .err = err },
-                .help => return .{ .command_help = sub_cmd_name },
+                .help => return .{ .command_help = field.name },
                 .version => return .version,
             }
         }
@@ -808,6 +871,11 @@ fn parseSubcommandGroup(
         const cmd_meta = CommandMod.getCommandMeta(field.type);
         for (cmd_meta.aliases) |alias| {
             if (std.mem.eql(u8, alias, sub_cmd_name)) {
+                // Return help for valid subcommand (via alias)
+                if (is_help_request) {
+                    return .{ .command_help = field.name };
+                }
+
                 const cmd_result = parse(field.type, sub_cmd_args);
                 switch (cmd_result) {
                     .ok => |cmd| {
@@ -831,7 +899,7 @@ fn isGlobalField(comptime GlobalOptions: type, name: []const u8) bool {
     if (type_info != .@"struct") return false;
 
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name)) {
+        if (optionMatchesField(name, field.name)) {
             return true;
         }
     }
@@ -843,7 +911,7 @@ fn isGlobalBoolField(comptime GlobalOptions: type, name: []const u8) bool {
     if (type_info != .@"struct") return false;
 
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name) and field.type == bool) {
+        if (optionMatchesField(name, field.name) and field.type == bool) {
             return true;
         }
     }
@@ -855,7 +923,7 @@ fn setGlobalField(comptime GlobalOptions: type, global: *GlobalOptions, name: []
     if (type_info != .@"struct") return CliError.usageError("invalid global options type");
 
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name)) {
+        if (optionMatchesField(name, field.name)) {
             if (parseValue(field.type, value)) |parsed| {
                 @field(global, field.name) = parsed;
                 return null;
@@ -872,7 +940,7 @@ fn setGlobalBoolField(comptime GlobalOptions: type, global: *GlobalOptions, name
     if (type_info != .@"struct") return CliError.usageError("invalid global options type");
 
     inline for (type_info.@"struct".fields) |field| {
-        if (std.mem.eql(u8, field.name, name) and field.type == bool) {
+        if (optionMatchesField(name, field.name) and field.type == bool) {
             @field(global, field.name) = value;
             return null;
         }
@@ -1353,4 +1421,236 @@ test "parseApp subcommand group with metadata" {
     const BibSubgroup = @TypeOf(@as(TestApp.Command, undefined).bib);
     try std.testing.expectEqualStrings("bib", BibSubgroup.meta.name);
     try std.testing.expectEqualStrings("Manage bibliography entries", BibSubgroup.meta.description);
+}
+
+test "parse hyphen-to-underscore normalization" {
+    const TestCmd = struct {
+        min_year: ?i32 = null,
+        max_results: u32 = 10,
+        local_only: bool = false,
+    };
+
+    // Hyphens should work (standard CLI convention)
+    const result1 = parse(TestCmd, &.{ "--min-year", "2020", "--max-results", "5", "--local-only" });
+    switch (result1) {
+        .ok => |cmd| {
+            try std.testing.expectEqual(@as(?i32, 2020), cmd.min_year);
+            try std.testing.expectEqual(@as(u32, 5), cmd.max_results);
+            try std.testing.expect(cmd.local_only);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Underscores should also work (for compatibility)
+    const result2 = parse(TestCmd, &.{ "--min_year", "2021" });
+    switch (result2) {
+        .ok => |cmd| {
+            try std.testing.expectEqual(@as(?i32, 2021), cmd.min_year);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp hyphen-to-underscore for global options" {
+    const HealthCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            base_url: ?[]const u8 = null,
+            dry_run: bool = false,
+        };
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    // Hyphens should work for global options
+    const result = parseApp(TestApp, &.{ "--base-url", "http://localhost", "--dry-run", "health" });
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expectEqualStrings("http://localhost", r.global.base_url.?);
+            try std.testing.expect(r.global.dry_run);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp unknown command help returns error" {
+    const HealthCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    // Unknown command with --help should return error, not help
+    const result = parseApp(TestApp, &.{ "unknown", "--help" });
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("unknown command", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp alias help returns canonical name" {
+    const ListCmd = struct {
+        pub const meta = .{
+            .name = "list",
+            .description = "List items",
+            .aliases = &[_][]const u8{"ls"},
+        };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .list = ListCmd,
+        });
+    };
+
+    // Using alias with --help should return canonical field name
+    const result = parseApp(TestApp, &.{ "ls", "--help" });
+    switch (result) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("list", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested subcommand help returns validated name" {
+    const BibAddCmd = struct {
+        pub const meta = .{ .name = "add", .description = "Add entry" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .meta = .{ .name = "bib", .description = "Bibliography" },
+                .commands = .{ .add = BibAddCmd },
+            }),
+        });
+    };
+
+    // Nested subcommand help should return subcommand name (validated)
+    const result = parseApp(TestApp, &.{ "bib", "add", "--help" });
+    switch (result) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("add", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp unknown subcommand help returns error" {
+    const BibAddCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+            }),
+        });
+    };
+
+    // Unknown subcommand with --help should return error
+    const result = parseApp(TestApp, &.{ "bib", "unknown", "--help" });
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("unknown subcommand", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested help bypasses required globals" {
+    const BibAddCmd = struct {
+        pub const meta = .{ .name = "add", .description = "Add entry" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            api_key: []const u8, // Required global option
+        };
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .meta = .{ .name = "bib", .description = "Bibliography" },
+                .commands = .{ .add = BibAddCmd },
+            }),
+        });
+    };
+
+    // Nested help should work without providing required globals
+    const result = parseApp(TestApp, &.{ "bib", "add", "--help" });
+    switch (result) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("add", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Group help should also work without required globals
+    const result2 = parseApp(TestApp, &.{ "bib", "--help" });
+    switch (result2) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("bib", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp help anywhere in args bypasses globals" {
+    const ListCmd = struct {
+        filter: ?[]const u8 = null,
+        pub const meta = .{ .name = "list", .description = "List items" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            api_key: []const u8, // Required global option
+        };
+        pub const Command = CommandMod.Commands(.{
+            .list = ListCmd,
+        });
+    };
+
+    // Help at the end of args should work without required globals
+    const result = parseApp(TestApp, &.{ "list", "--filter", "test", "--help" });
+    switch (result) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("list", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp error messages show hyphens not underscores" {
+    const ListCmd = struct {
+        pub const meta = .{ .name = "list", .description = "List items" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            api_key: []const u8, // Required - has underscore
+        };
+        pub const Command = CommandMod.Commands(.{
+            .list = ListCmd,
+        });
+    };
+
+    // Missing required global should show hyphenated option name
+    const result = parseApp(TestApp, &.{"list"});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("missing required global option", err.message);
+            // Context should show "--api-key" not "--api_key"
+            try std.testing.expectEqualStrings("--api-key", err.context.?);
+        },
+        else => try std.testing.expect(false),
+    }
 }
