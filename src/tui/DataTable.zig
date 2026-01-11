@@ -346,7 +346,7 @@ pub const DataTable = struct {
         // Fill remaining space
         while (y < size.height) : (y += 1) {
             for (0..size.width) |x| {
-                view.setCell(@intCast(x), y, makeCell(' ', self.row_style.fg, self.row_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', self.row_style.fg, self.row_style.bg));
             }
         }
     }
@@ -394,7 +394,7 @@ pub const DataTable = struct {
 
             // Fill with spaces
             for (0..available) |dx| {
-                view.setCell(@intCast(x + dx), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x + dx), y, Cell.simple(' ', style.fg, style.bg));
             }
 
             // Print text
@@ -406,14 +406,14 @@ pub const DataTable = struct {
 
             // Column border
             if (self.show_column_borders and i + 1 < self.columns.len and x < width) {
-                view.setCell(@intCast(x), y, makeCell(self.border_style.vertical, self.row_style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(self.border_style.vertical, self.row_style.fg, style.bg));
                 x += 1;
             }
         }
 
         // Fill remaining width
         while (x < width) : (x += 1) {
-            view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
         }
     }
 
@@ -429,31 +429,21 @@ pub const DataTable = struct {
             // Draw horizontal line
             for (0..col_width) |_| {
                 if (x >= width) break;
-                view.setCell(@intCast(x), y, makeCell(self.border_style.horizontal, self.header_style.fg, self.header_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(self.border_style.horizontal, self.header_style.fg, self.header_style.bg));
                 x += 1;
             }
 
             // Column intersection
             if (self.show_column_borders and i + 1 < self.columns.len and x < width) {
-                view.setCell(@intCast(x), y, makeCell('┼', self.header_style.fg, self.header_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple('┼', self.header_style.fg, self.header_style.bg));
                 x += 1;
             }
         }
 
         // Fill remaining width
         while (x < width) : (x += 1) {
-            view.setCell(@intCast(x), y, makeCell(self.border_style.horizontal, self.header_style.fg, self.header_style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(self.border_style.horizontal, self.header_style.fg, self.header_style.bg));
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {

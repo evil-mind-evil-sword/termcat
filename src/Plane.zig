@@ -191,19 +191,24 @@ pub fn isVisible(self: *const Plane) bool {
     return true;
 }
 
+/// Find the index of a child in this plane's children list.
+/// Returns null if not found.
+fn findChildIndex(self: *const Plane, child: *const Plane) ?usize {
+    for (self.children.items, 0..) |c, i| {
+        if (c == child) return i;
+    }
+    return null;
+}
+
 /// Raise this plane to the top of its parent's z-order.
 /// No-op for root planes.
 pub fn raise(self: *Plane) void {
     if (self.parent) |parent| {
-        // Find and remove self
-        for (parent.children.items, 0..) |child, i| {
-            if (child == self) {
-                _ = parent.children.orderedRemove(i);
-                break;
-            }
+        if (parent.findChildIndex(self)) |idx| {
+            _ = parent.children.orderedRemove(idx);
+            // Add to end (top)
+            parent.children.append(parent.allocator, self) catch {}; // Can't fail - we just removed one
         }
-        // Add to end (top)
-        parent.children.append(parent.allocator, self) catch {}; // Can't fail - we just removed one
     }
 }
 
@@ -211,15 +216,11 @@ pub fn raise(self: *Plane) void {
 /// No-op for root planes.
 pub fn lower(self: *Plane) void {
     if (self.parent) |parent| {
-        // Find and remove self
-        for (parent.children.items, 0..) |child, i| {
-            if (child == self) {
-                _ = parent.children.orderedRemove(i);
-                break;
-            }
+        if (parent.findChildIndex(self)) |idx| {
+            _ = parent.children.orderedRemove(idx);
+            // Insert at beginning (bottom)
+            parent.children.insert(parent.allocator, 0, self) catch {}; // Can't fail - we just removed one
         }
-        // Insert at beginning (bottom)
-        parent.children.insert(parent.allocator, 0, self) catch {}; // Can't fail - we just removed one
     }
 }
 
@@ -230,23 +231,15 @@ pub fn raiseAbove(self: *Plane, other: *Plane) void {
 
     const parent = self.parent.?;
 
-    // Find positions
-    var self_idx: ?usize = null;
-    var other_idx: ?usize = null;
-
-    for (parent.children.items, 0..) |child, i| {
-        if (child == self) self_idx = i;
-        if (child == other) other_idx = i;
-    }
-
-    if (self_idx == null or other_idx == null) return;
+    const self_idx = parent.findChildIndex(self) orelse return;
+    const other_idx = parent.findChildIndex(other) orelse return;
 
     // Remove self
-    _ = parent.children.orderedRemove(self_idx.?);
+    _ = parent.children.orderedRemove(self_idx);
 
     // Adjust other_idx if necessary
-    var insert_pos = other_idx.?;
-    if (self_idx.? < other_idx.?) {
+    var insert_pos = other_idx;
+    if (self_idx < other_idx) {
         insert_pos -= 1; // other shifted down after self was removed
     }
 
@@ -261,23 +254,15 @@ pub fn lowerBelow(self: *Plane, other: *Plane) void {
 
     const parent = self.parent.?;
 
-    // Find positions
-    var self_idx: ?usize = null;
-    var other_idx: ?usize = null;
-
-    for (parent.children.items, 0..) |child, i| {
-        if (child == self) self_idx = i;
-        if (child == other) other_idx = i;
-    }
-
-    if (self_idx == null or other_idx == null) return;
+    const self_idx = parent.findChildIndex(self) orelse return;
+    const other_idx = parent.findChildIndex(other) orelse return;
 
     // Remove self
-    _ = parent.children.orderedRemove(self_idx.?);
+    _ = parent.children.orderedRemove(self_idx);
 
     // Adjust other_idx if necessary
-    var insert_pos = other_idx.?;
-    if (self_idx.? < other_idx.?) {
+    var insert_pos = other_idx;
+    if (self_idx < other_idx) {
         insert_pos -= 1; // other shifted down after self was removed
     }
 

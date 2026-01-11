@@ -283,13 +283,13 @@ pub const Markdown = struct {
             .horizontal_rule => {
                 // Draw horizontal line
                 while (x < width) : (x += 1) {
-                    view.setCell(@intCast(x), y, makeCell('─', style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple('─', style.fg, style.bg));
                 }
                 return;
             },
             .blockquote => {
-                view.setCell(0, y, makeCell('│', self.blockquote_style.fg, style.bg));
-                view.setCell(1, y, makeCell(' ', style.fg, style.bg));
+                view.setCell(0, y, Cell.simple('│', self.blockquote_style.fg, style.bg));
+                view.setCell(1, y, Cell.simple(' ', style.fg, style.bg));
                 x = 2;
             },
             .bullet_list => {
@@ -297,10 +297,10 @@ pub const Markdown = struct {
                 const indent_x = block.indent * 2;
                 x = indent_x;
                 if (line_in_block == 0 and x < width) {
-                    view.setCell(@intCast(x), y, makeCell(self.bullet_char, style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple(self.bullet_char, style.fg, style.bg));
                     x += 1;
                     if (x < width) {
-                        view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                        view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                         x += 1;
                     }
                 } else {
@@ -318,7 +318,7 @@ pub const Markdown = struct {
                         view.print(@intCast(x), y, num_str[0..num_len], style.fg, style.bg, style.attrs);
                         x += num_len;
                         if (x < width) {
-                            view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                            view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                             x += 1;
                         }
                     }
@@ -354,7 +354,7 @@ pub const Markdown = struct {
         const utf8_view = std.unicode.Utf8View.init(text) catch {
             // Fallback: render as replacement characters for invalid UTF-8
             while (x < width and x - start_x < text.len) {
-                view.setCell(@intCast(x), y, makeCell(0xFFFD, current_style.fg, current_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(0xFFFD, current_style.fg, current_style.bg));
                 x += 1;
             }
             return;
@@ -393,25 +393,15 @@ pub const Markdown = struct {
             const char_width: u16 = @intCast(unicode.codePointWidth(codepoint));
             if (char_width == 0) continue; // Skip combining characters
             if (x + char_width > width) break; // No room for wide char
-            view.setCell(@intCast(x), y, makeCell(codepoint, current_style.fg, current_style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(codepoint, current_style.fg, current_style.bg));
             x += char_width;
         }
     }
 
     fn clearLine(view: *PlaneView, width: u16, y: i32, style: Style) void {
         for (0..width) |x| {
-            view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {

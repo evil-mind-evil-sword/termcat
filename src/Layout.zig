@@ -104,17 +104,17 @@ pub fn drawBox(
     const y2 = rect.y +| rect.height -| 1;
 
     // Corners
-    buffer.setCell(x1, y1, makeCell(style.top_left, fg, bg, attrs));
-    buffer.setCell(x2, y1, makeCell(style.top_right, fg, bg, attrs));
-    buffer.setCell(x1, y2, makeCell(style.bottom_left, fg, bg, attrs));
-    buffer.setCell(x2, y2, makeCell(style.bottom_right, fg, bg, attrs));
+    buffer.setCell(x1, y1, Cell.styled(style.top_left, fg, bg, attrs));
+    buffer.setCell(x2, y1, Cell.styled(style.top_right, fg, bg, attrs));
+    buffer.setCell(x1, y2, Cell.styled(style.bottom_left, fg, bg, attrs));
+    buffer.setCell(x2, y2, Cell.styled(style.bottom_right, fg, bg, attrs));
 
     // Horizontal lines
     if (x2 > x1 +| 1) {
         var x = x1 +| 1;
         while (x < x2) : (x +|= 1) {
-            buffer.setCell(x, y1, makeCell(style.horizontal, fg, bg, attrs));
-            buffer.setCell(x, y2, makeCell(style.horizontal, fg, bg, attrs));
+            buffer.setCell(x, y1, Cell.styled(style.horizontal, fg, bg, attrs));
+            buffer.setCell(x, y2, Cell.styled(style.horizontal, fg, bg, attrs));
         }
     }
 
@@ -122,8 +122,8 @@ pub fn drawBox(
     if (y2 > y1 +| 1) {
         var y = y1 +| 1;
         while (y < y2) : (y +|= 1) {
-            buffer.setCell(x1, y, makeCell(style.vertical, fg, bg, attrs));
-            buffer.setCell(x2, y, makeCell(style.vertical, fg, bg, attrs));
+            buffer.setCell(x1, y, Cell.styled(style.vertical, fg, bg, attrs));
+            buffer.setCell(x2, y, Cell.styled(style.vertical, fg, bg, attrs));
         }
     }
 }
@@ -139,7 +139,7 @@ pub fn drawHLine(
     bg: Color,
     attrs: Attributes,
 ) void {
-    const cell = makeCell(char, fg, bg, attrs);
+    const cell = Cell.styled(char, fg, bg, attrs);
     var i: u16 = 0;
     while (i < length) : (i +|= 1) {
         buffer.setCell(x +| i, y, cell);
@@ -157,7 +157,7 @@ pub fn drawVLine(
     bg: Color,
     attrs: Attributes,
 ) void {
-    const cell = makeCell(char, fg, bg, attrs);
+    const cell = Cell.styled(char, fg, bg, attrs);
     var i: u16 = 0;
     while (i < length) : (i +|= 1) {
         buffer.setCell(x, y +| i, cell);
@@ -299,7 +299,7 @@ fn printWrapCharWithPos(
         // This check must come BEFORE the general wrap check to place the space
         if (char_width == 2 and col +| 1 >= width and col < width) {
             // Wide char needs 2 cells but only 1 remains - place space at edge
-            buffer.setCell(x +| col, y +| row, makeCell(' ', fg, bg, attrs));
+            buffer.setCell(x +| col, y +| row, Cell.styled(' ', fg, bg, attrs));
             last_base_x = x +| col;
             last_base_y = y +| row;
             has_last_base = true;
@@ -319,14 +319,14 @@ fn printWrapCharWithPos(
 
         // Print the character
         if (char_width == 2) {
-            buffer.setCell(x +| col, y +| row, makeCell(cp, fg, bg, attrs));
+            buffer.setCell(x +| col, y +| row, Cell.styled(cp, fg, bg, attrs));
             buffer.setCell(x +| (col +| 1), y +| row, Cell.continuation(fg, bg, attrs));
             last_base_x = x +| col;
             last_base_y = y +| row;
             has_last_base = true;
             col +|= 2;
         } else if (char_width == 1) {
-            buffer.setCell(x +| col, y +| row, makeCell(cp, fg, bg, attrs));
+            buffer.setCell(x +| col, y +| row, Cell.styled(cp, fg, bg, attrs));
             last_base_x = x +| col;
             last_base_y = y +| row;
             has_last_base = true;
@@ -422,7 +422,7 @@ fn printWrapWord(
         // Print trailing space if there is one and room
         if (i < text.len and text[i] == ' ') {
             if (col < width) {
-                buffer.setCell(x +| col, y +| row, makeCell(' ', fg, bg, attrs));
+                buffer.setCell(x +| col, y +| row, Cell.styled(' ', fg, bg, attrs));
                 col +|= 1;
             }
             i += 1;
@@ -450,17 +450,6 @@ fn findNextWord(text: []const u8) struct { word: []const u8, rest: []const u8, b
         .word = text[start..end],
         .rest = text[end..],
         .bytes_consumed = end,
-    };
-}
-
-/// Helper to create a cell
-fn makeCell(char: u21, fg: Color, bg: Color, attrs: Attributes) Cell {
-    return .{
-        .char = char,
-        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-        .fg = fg,
-        .bg = bg,
-        .attrs = attrs,
     };
 }
 

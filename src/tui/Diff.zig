@@ -309,7 +309,7 @@ pub const Diff = struct {
 
             // Clear line
             for (0..size.width) |x| {
-                view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
             }
 
             var x: u16 = 0;
@@ -327,7 +327,7 @@ pub const Diff = struct {
                 }
                 x += 4;
 
-                view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                 x += 1;
 
                 // Right number
@@ -339,7 +339,7 @@ pub const Diff = struct {
                 }
                 x += 4;
 
-                view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                 x += 1;
             }
 
@@ -351,7 +351,7 @@ pub const Diff = struct {
                 .header, .hunk => ' ',
             };
             if (line.line_type != .header and line.line_type != .hunk) {
-                view.setCell(@intCast(x), y, makeCell(prefix, style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(prefix, style.fg, style.bg));
                 x += 1;
             }
 
@@ -367,7 +367,7 @@ pub const Diff = struct {
         for (visible_count..size.height) |i| {
             const y: i32 = @intCast(i);
             for (0..size.width) |x_| {
-                view.setCell(@intCast(x_), y, makeCell(' ', self.context_style.fg, self.context_style.bg));
+                view.setCell(@intCast(x_), y, Cell.simple(' ', self.context_style.fg, self.context_style.bg));
             }
         }
     }
@@ -396,11 +396,11 @@ pub const Diff = struct {
 
             // Clear line
             for (0..size.width) |x| {
-                view.setCell(@intCast(x), y, makeCell(' ', self.context_style.fg, self.context_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', self.context_style.fg, self.context_style.bg));
             }
 
             // Draw separator
-            view.setCell(@intCast(half_width), y, makeCell('│', self.context_style.fg, self.context_style.bg));
+            view.setCell(@intCast(half_width), y, Cell.simple('│', self.context_style.fg, self.context_style.bg));
 
             switch (line.line_type) {
                 .header, .hunk => {
@@ -442,19 +442,9 @@ pub const Diff = struct {
         for (visible_count..size.height) |i| {
             const y: i32 = @intCast(i);
             for (0..size.width) |x_| {
-                view.setCell(@intCast(x_), y, makeCell(' ', self.context_style.fg, self.context_style.bg));
+                view.setCell(@intCast(x_), y, Cell.simple(' ', self.context_style.fg, self.context_style.bg));
             }
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {

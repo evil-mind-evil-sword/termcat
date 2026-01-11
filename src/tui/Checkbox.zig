@@ -130,17 +130,17 @@ pub const Checkbox = struct {
         switch (self.checkbox_style) {
             .bracket => {
                 // Draw [ ]
-                view.setCell(0, 0, makeCell('[', self.style.fg, self.style.bg));
-                view.setCell(1, 0, makeCell(
+                view.setCell(0, 0, Cell.simple('[', self.style.fg, self.style.bg));
+                view.setCell(1, 0, Cell.simple(
                     if (self.checked) chars.checked else chars.unchecked,
                     indicator_style.fg,
                     indicator_style.bg,
                 ));
-                view.setCell(2, 0, makeCell(']', self.style.fg, self.style.bg));
+                view.setCell(2, 0, Cell.simple(']', self.style.fg, self.style.bg));
                 x = 3;
             },
             .box, .mark => {
-                view.setCell(0, 0, makeCell(
+                view.setCell(0, 0, Cell.simple(
                     if (self.checked) chars.checked else chars.unchecked,
                     indicator_style.fg,
                     indicator_style.bg,
@@ -188,16 +188,6 @@ pub const Checkbox = struct {
         }
 
         return .ignored;
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     /// VTable for Widget interface
@@ -288,13 +278,13 @@ pub const RadioButton = struct {
         const indicator_style = if (self.selected) self.selected_style else self.style;
 
         // Draw ( ) or (●)
-        view.setCell(0, 0, makeCell('(', self.style.fg, self.style.bg));
-        view.setCell(1, 0, makeCell(
+        view.setCell(0, 0, Cell.simple('(', self.style.fg, self.style.bg));
+        view.setCell(1, 0, Cell.simple(
             if (self.selected) '●' else ' ',
             indicator_style.fg,
             indicator_style.bg,
         ));
-        view.setCell(2, 0, makeCell(')', self.style.fg, self.style.bg));
+        view.setCell(2, 0, Cell.simple(')', self.style.fg, self.style.bg));
 
         // Draw label
         if (self.label.len > 0 and size.width > 4) {
@@ -333,16 +323,6 @@ pub const RadioButton = struct {
         }
 
         return .ignored;
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     /// VTable for Widget interface
@@ -439,19 +419,19 @@ pub const Switch = struct {
         // Draw switch track: [●○○] (on) or [○○●] (off)
         const track_style = if (self.on) self.on_style else self.off_style;
 
-        view.setCell(0, 0, makeCell('[', self.style.fg, self.style.bg));
+        view.setCell(0, 0, Cell.simple('[', self.style.fg, self.style.bg));
 
         if (self.on) {
-            view.setCell(1, 0, makeCell('●', track_style.fg, track_style.bg));
-            view.setCell(2, 0, makeCell('─', track_style.fg, track_style.bg));
-            view.setCell(3, 0, makeCell('○', self.off_style.fg, self.off_style.bg));
+            view.setCell(1, 0, Cell.simple('●', track_style.fg, track_style.bg));
+            view.setCell(2, 0, Cell.simple('─', track_style.fg, track_style.bg));
+            view.setCell(3, 0, Cell.simple('○', self.off_style.fg, self.off_style.bg));
         } else {
-            view.setCell(1, 0, makeCell('○', self.off_style.fg, self.off_style.bg));
-            view.setCell(2, 0, makeCell('─', self.style.fg, self.style.bg));
-            view.setCell(3, 0, makeCell('●', track_style.fg, track_style.bg));
+            view.setCell(1, 0, Cell.simple('○', self.off_style.fg, self.off_style.bg));
+            view.setCell(2, 0, Cell.simple('─', self.style.fg, self.style.bg));
+            view.setCell(3, 0, Cell.simple('●', track_style.fg, track_style.bg));
         }
 
-        view.setCell(4, 0, makeCell(']', self.style.fg, self.style.bg));
+        view.setCell(4, 0, Cell.simple(']', self.style.fg, self.style.bg));
 
         // Draw label
         if (self.label.len > 0 and size.width > 6) {
@@ -490,16 +470,6 @@ pub const Switch = struct {
         }
 
         return .ignored;
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     /// VTable for Widget interface

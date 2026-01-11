@@ -161,17 +161,17 @@ pub const Modal = struct {
         // Draw border
         if (dialog_width >= 2 and dialog_height >= 2) {
             // Corners
-            dialog_view.setCell(0, 0, makeCell(self.border_style.top_left, self.border_fg, self.border_bg));
-            dialog_view.setCell(@intCast(dialog_width - 1), 0, makeCell(self.border_style.top_right, self.border_fg, self.border_bg));
-            dialog_view.setCell(0, @intCast(dialog_height - 1), makeCell(self.border_style.bottom_left, self.border_fg, self.border_bg));
-            dialog_view.setCell(@intCast(dialog_width - 1), @intCast(dialog_height - 1), makeCell(self.border_style.bottom_right, self.border_fg, self.border_bg));
+            dialog_view.setCell(0, 0, Cell.simple(self.border_style.top_left, self.border_fg, self.border_bg));
+            dialog_view.setCell(@intCast(dialog_width - 1), 0, Cell.simple(self.border_style.top_right, self.border_fg, self.border_bg));
+            dialog_view.setCell(0, @intCast(dialog_height - 1), Cell.simple(self.border_style.bottom_left, self.border_fg, self.border_bg));
+            dialog_view.setCell(@intCast(dialog_width - 1), @intCast(dialog_height - 1), Cell.simple(self.border_style.bottom_right, self.border_fg, self.border_bg));
 
             // Horizontal lines
             if (dialog_width > 2) {
                 var x: u16 = 1;
                 while (x < dialog_width - 1) : (x += 1) {
-                    dialog_view.setCell(@intCast(x), 0, makeCell(self.border_style.horizontal, self.border_fg, self.border_bg));
-                    dialog_view.setCell(@intCast(x), @intCast(dialog_height - 1), makeCell(self.border_style.horizontal, self.border_fg, self.border_bg));
+                    dialog_view.setCell(@intCast(x), 0, Cell.simple(self.border_style.horizontal, self.border_fg, self.border_bg));
+                    dialog_view.setCell(@intCast(x), @intCast(dialog_height - 1), Cell.simple(self.border_style.horizontal, self.border_fg, self.border_bg));
                 }
             }
 
@@ -179,8 +179,8 @@ pub const Modal = struct {
             if (dialog_height > 2) {
                 var y: u16 = 1;
                 while (y < dialog_height - 1) : (y += 1) {
-                    dialog_view.setCell(0, @intCast(y), makeCell(self.border_style.vertical, self.border_fg, self.border_bg));
-                    dialog_view.setCell(@intCast(dialog_width - 1), @intCast(y), makeCell(self.border_style.vertical, self.border_fg, self.border_bg));
+                    dialog_view.setCell(0, @intCast(y), Cell.simple(self.border_style.vertical, self.border_fg, self.border_bg));
+                    dialog_view.setCell(@intCast(dialog_width - 1), @intCast(y), Cell.simple(self.border_style.vertical, self.border_fg, self.border_bg));
                 }
             }
 
@@ -190,12 +190,12 @@ pub const Modal = struct {
                 const available_width = dialog_width -| 4;
 
                 if (title_width > 0 and available_width > 0) {
-                    dialog_view.setCell(1, 0, makeCell(' ', self.border_fg, self.border_bg));
+                    dialog_view.setCell(1, 0, Cell.simple(' ', self.border_fg, self.border_bg));
                     dialog_view.print(2, 0, title, self.border_fg, self.border_bg, .{});
 
                     const display_width = @min(title_width, available_width);
                     if (2 + display_width < dialog_width - 1) {
-                        dialog_view.setCell(@intCast(2 + display_width), 0, makeCell(' ', self.border_fg, self.border_bg));
+                        dialog_view.setCell(@intCast(2 + display_width), 0, Cell.simple(' ', self.border_fg, self.border_bg));
                     }
                 }
             }
@@ -240,16 +240,6 @@ pub const Modal = struct {
         return .ignored;
     }
 
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
-    }
-
     /// VTable for Widget interface
     pub const widget_vtable = Widget.VTable{
         .measureFn = measure,
@@ -282,7 +272,7 @@ const FillWidget = struct {
         while (y < size.height) : (y += 1) {
             var x: i32 = 0;
             while (x < size.width) : (x += 1) {
-                view.setCell(x, y, Modal.makeCell(self.char, .default, .default));
+                view.setCell(x, y, Modal.Cell.simple(self.char, .default, .default));
             }
         }
     }

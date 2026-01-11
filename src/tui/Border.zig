@@ -91,17 +91,17 @@ pub const Border = struct {
         if (view_size.width < 2 or view_size.height < 2) return;
 
         // Draw corners
-        view.setCell(0, 0, makeCell(self.style.top_left, self.fg, self.bg, self.attrs));
-        view.setCell(@intCast(view_size.width - 1), 0, makeCell(self.style.top_right, self.fg, self.bg, self.attrs));
-        view.setCell(0, @intCast(view_size.height - 1), makeCell(self.style.bottom_left, self.fg, self.bg, self.attrs));
-        view.setCell(@intCast(view_size.width - 1), @intCast(view_size.height - 1), makeCell(self.style.bottom_right, self.fg, self.bg, self.attrs));
+        view.setCell(0, 0, Cell.styled(self.style.top_left, self.fg, self.bg, self.attrs));
+        view.setCell(@intCast(view_size.width - 1), 0, Cell.styled(self.style.top_right, self.fg, self.bg, self.attrs));
+        view.setCell(0, @intCast(view_size.height - 1), Cell.styled(self.style.bottom_left, self.fg, self.bg, self.attrs));
+        view.setCell(@intCast(view_size.width - 1), @intCast(view_size.height - 1), Cell.styled(self.style.bottom_right, self.fg, self.bg, self.attrs));
 
         // Draw horizontal lines
         if (view_size.width > 2) {
             var x: u16 = 1;
             while (x < view_size.width - 1) : (x += 1) {
-                view.setCell(@intCast(x), 0, makeCell(self.style.horizontal, self.fg, self.bg, self.attrs));
-                view.setCell(@intCast(x), @intCast(view_size.height - 1), makeCell(self.style.horizontal, self.fg, self.bg, self.attrs));
+                view.setCell(@intCast(x), 0, Cell.styled(self.style.horizontal, self.fg, self.bg, self.attrs));
+                view.setCell(@intCast(x), @intCast(view_size.height - 1), Cell.styled(self.style.horizontal, self.fg, self.bg, self.attrs));
             }
         }
 
@@ -109,8 +109,8 @@ pub const Border = struct {
         if (view_size.height > 2) {
             var y: u16 = 1;
             while (y < view_size.height - 1) : (y += 1) {
-                view.setCell(0, @intCast(y), makeCell(self.style.vertical, self.fg, self.bg, self.attrs));
-                view.setCell(@intCast(view_size.width - 1), @intCast(y), makeCell(self.style.vertical, self.fg, self.bg, self.attrs));
+                view.setCell(0, @intCast(y), Cell.styled(self.style.vertical, self.fg, self.bg, self.attrs));
+                view.setCell(@intCast(view_size.width - 1), @intCast(y), Cell.styled(self.style.vertical, self.fg, self.bg, self.attrs));
             }
         }
 
@@ -125,14 +125,14 @@ pub const Border = struct {
                 const start_x: i32 = 2; // After corner and space
 
                 // Print space before title
-                view.setCell(1, 0, makeCell(' ', self.fg, self.bg, self.attrs));
+                view.setCell(1, 0, Cell.styled(' ', self.fg, self.bg, self.attrs));
 
                 // Print title (clipped if needed)
                 view.print(start_x, 0, title, self.fg, self.bg, self.attrs);
 
                 // Print space after title (if room)
                 if (start_x + @as(i32, display_width) < view_size.width - 1) {
-                    view.setCell(start_x + @as(i32, display_width), 0, makeCell(' ', self.fg, self.bg, self.attrs));
+                    view.setCell(start_x + @as(i32, display_width), 0, Cell.styled(' ', self.fg, self.bg, self.attrs));
                 }
             }
         }
@@ -158,17 +158,6 @@ pub const Border = struct {
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {
         const self: *Border = @ptrCast(@alignCast(ptr));
         return self.child.handleEvent(event);
-    }
-
-    /// Helper to create a cell
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color, attrs: Cell.Attributes) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = attrs,
-        };
     }
 
     /// VTable for Widget interface
@@ -200,7 +189,7 @@ const FillWidget = struct {
         while (y < size.height) : (y += 1) {
             var x: i32 = 0;
             while (x < size.width) : (x += 1) {
-                view.setCell(x, y, Border.makeCell(self.char, .default, .default, .{}));
+                view.setCell(x, y, Cell.styled(self.char, .default, .default, .{}));
             }
         }
     }

@@ -229,29 +229,29 @@ pub const Toast = struct {
 
             // Draw box
             // Top border
-            view.setCell(0, @intCast(y), makeCell(box.top_left, style.fg, style.bg));
+            view.setCell(0, @intCast(y), Cell.simple(box.top_left, style.fg, style.bg));
             var x: u16 = 1;
             while (x < self.width - 1 and x < size.width - 1) : (x += 1) {
-                view.setCell(@intCast(x), @intCast(y), makeCell(box.horizontal, style.fg, style.bg));
+                view.setCell(@intCast(x), @intCast(y), Cell.simple(box.horizontal, style.fg, style.bg));
             }
             if (self.width - 1 < size.width) {
-                view.setCell(@intCast(self.width - 1), @intCast(y), makeCell(box.top_right, style.fg, style.bg));
+                view.setCell(@intCast(self.width - 1), @intCast(y), Cell.simple(box.top_right, style.fg, style.bg));
             }
 
             // Content line
             y += 1;
-            view.setCell(0, @intCast(y), makeCell(box.vertical, style.fg, style.bg));
+            view.setCell(0, @intCast(y), Cell.simple(box.vertical, style.fg, style.bg));
 
             // Fill content background
             x = 1;
             while (x < self.width - 1 and x < size.width - 1) : (x += 1) {
-                view.setCell(@intCast(x), @intCast(y), makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), @intCast(y), Cell.simple(' ', style.fg, style.bg));
             }
 
             // Draw icon and text
             var text_x: u16 = 2;
             if (self.show_icons) {
-                view.setCell(2, @intCast(y), makeCell(toast.level.icon(), style.fg, style.bg));
+                view.setCell(2, @intCast(y), Cell.simple(toast.level.icon(), style.fg, style.bg));
                 text_x = 4;
             }
 
@@ -262,32 +262,22 @@ pub const Toast = struct {
             }
 
             if (self.width - 1 < size.width) {
-                view.setCell(@intCast(self.width - 1), @intCast(y), makeCell(box.vertical, style.fg, style.bg));
+                view.setCell(@intCast(self.width - 1), @intCast(y), Cell.simple(box.vertical, style.fg, style.bg));
             }
 
             // Bottom border
             y += 1;
-            view.setCell(0, @intCast(y), makeCell(box.bottom_left, style.fg, style.bg));
+            view.setCell(0, @intCast(y), Cell.simple(box.bottom_left, style.fg, style.bg));
             x = 1;
             while (x < self.width - 1 and x < size.width - 1) : (x += 1) {
-                view.setCell(@intCast(x), @intCast(y), makeCell(box.horizontal, style.fg, style.bg));
+                view.setCell(@intCast(x), @intCast(y), Cell.simple(box.horizontal, style.fg, style.bg));
             }
             if (self.width - 1 < size.width) {
-                view.setCell(@intCast(self.width - 1), @intCast(y), makeCell(box.bottom_right, style.fg, style.bg));
+                view.setCell(@intCast(self.width - 1), @intCast(y), Cell.simple(box.bottom_right, style.fg, style.bg));
             }
 
             y += 1;
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     /// VTable for Widget interface

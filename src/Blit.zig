@@ -37,6 +37,50 @@ pub const TileOptions = struct {
     transparent: bool = false,
 };
 
+/// Result of computing a clipped blit region.
+pub const ClippedRegion = struct {
+    /// Width of the region to copy (0 if nothing to copy)
+    width: u16,
+    /// Height of the region to copy (0 if nothing to copy)
+    height: u16,
+
+    /// Returns true if the region is non-empty
+    pub fn nonEmpty(self: ClippedRegion) bool {
+        return self.width > 0 and self.height > 0;
+    }
+};
+
+/// Compute the clipped region for a blit operation.
+///
+/// This calculates the actual copy dimensions after clipping to both
+/// source and destination bounds.
+pub fn computeClippedRegion(
+    src_width: u16,
+    src_height: u16,
+    dest_width: u16,
+    dest_height: u16,
+    dest_x: u16,
+    dest_y: u16,
+    src_region: ?Rect,
+) ClippedRegion {
+    const src_rect = src_region orelse Rect{
+        .x = 0,
+        .y = 0,
+        .width = src_width,
+        .height = src_height,
+    };
+
+    // Step 1: Clip to source bounds
+    const src_w = @min(src_rect.width, src_width -| src_rect.x);
+    const src_h = @min(src_rect.height, src_height -| src_rect.y);
+
+    // Step 2: Clip to destination bounds
+    return .{
+        .width = @min(src_w, dest_width -| dest_x),
+        .height = @min(src_h, dest_height -| dest_y),
+    };
+}
+
 /// Check if a cell is transparent (should not overwrite underlying content).
 ///
 /// A cell is transparent only if:
@@ -76,27 +120,22 @@ pub fn blitBufferToPlane(
     blitBufferToBuffer(dest_buf, dest_x, dest_y, src, options);
 
     // Mark the affected region as dirty
-    const src_rect = options.src_region orelse Rect{
-        .x = 0,
-        .y = 0,
-        .width = src.width,
-        .height = src.height,
-    };
+    const region = computeClippedRegion(
+        src.width,
+        src.height,
+        dest.width,
+        dest.height,
+        dest_x,
+        dest_y,
+        options.src_region,
+    );
 
-    // Step 1: Clip to source bounds
-    const src_w = @min(src_rect.width, src.width -| src_rect.x);
-    const src_h = @min(src_rect.height, src.height -| src_rect.y);
-
-    // Step 2: Clip to destination bounds
-    const copy_w = @min(src_w, dest.width -| dest_x);
-    const copy_h = @min(src_h, dest.height -| dest_y);
-
-    if (copy_w > 0 and copy_h > 0) {
+    if (region.nonEmpty()) {
         dest.markDirtyRect(.{
             .x = dest_x,
             .y = dest_y,
-            .width = copy_w,
-            .height = copy_h,
+            .width = region.width,
+            .height = region.height,
         });
     }
 }
@@ -122,27 +161,22 @@ pub fn blitPlaneToPlane(
     blitBufferToBuffer(dest_buf, dest_x, dest_y, &src.buffer, options);
 
     // Mark the affected region as dirty
-    const src_rect = options.src_region orelse Rect{
-        .x = 0,
-        .y = 0,
-        .width = src.width,
-        .height = src.height,
-    };
+    const region = computeClippedRegion(
+        src.width,
+        src.height,
+        dest.width,
+        dest.height,
+        dest_x,
+        dest_y,
+        options.src_region,
+    );
 
-    // Step 1: Clip to source bounds
-    const src_w = @min(src_rect.width, src.width -| src_rect.x);
-    const src_h = @min(src_rect.height, src.height -| src_rect.y);
-
-    // Step 2: Clip to destination bounds
-    const copy_w = @min(src_w, dest.width -| dest_x);
-    const copy_h = @min(src_h, dest.height -| dest_y);
-
-    if (copy_w > 0 and copy_h > 0) {
+    if (region.nonEmpty()) {
         dest.markDirtyRect(.{
             .x = dest_x,
             .y = dest_y,
-            .width = copy_w,
-            .height = copy_h,
+            .width = region.width,
+            .height = region.height,
         });
     }
 }

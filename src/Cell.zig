@@ -333,6 +333,29 @@ pub const default: Cell = .{
     .attrs = .{},
 };
 
+/// Create a simple cell with character and colors.
+/// This is a convenience factory for widgets that need basic cells without attributes.
+pub fn simple(char: u21, fg: Color, bg: Color) Cell {
+    return .{
+        .char = char,
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+        .fg = fg,
+        .bg = bg,
+        .attrs = .{},
+    };
+}
+
+/// Create a styled cell with character, colors, and attributes.
+pub fn styled(char: u21, fg: Color, bg: Color, attrs: Attributes) Cell {
+    return .{
+        .char = char,
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+        .fg = fg,
+        .bg = bg,
+        .attrs = attrs,
+    };
+}
+
 /// Check if this is a continuation cell (second half of wide character)
 pub fn isContinuation(self: Cell) bool {
     return self.char == 0;

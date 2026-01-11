@@ -346,26 +346,26 @@ pub const CommandPalette = struct {
         var y: i32 = 0;
 
         // Top border
-        view.setCell(0, y, makeCell(box.top_left, self.bg_style.fg, self.bg_style.bg));
+        view.setCell(0, y, Cell.simple(box.top_left, self.bg_style.fg, self.bg_style.bg));
         for (1..size.width - 1) |x| {
-            view.setCell(@intCast(x), y, makeCell(box.horizontal, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(box.horizontal, self.bg_style.fg, self.bg_style.bg));
         }
-        view.setCell(@intCast(size.width - 1), y, makeCell(box.top_right, self.bg_style.fg, self.bg_style.bg));
+        view.setCell(@intCast(size.width - 1), y, Cell.simple(box.top_right, self.bg_style.fg, self.bg_style.bg));
         y += 1;
 
         // Input line
-        view.setCell(0, y, makeCell(box.vertical, self.bg_style.fg, self.bg_style.bg));
+        view.setCell(0, y, Cell.simple(box.vertical, self.bg_style.fg, self.bg_style.bg));
 
         // Clear input area
         for (1..size.width - 1) |x| {
-            view.setCell(@intCast(x), y, makeCell(' ', self.input_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(' ', self.input_style.fg, self.bg_style.bg));
         }
 
         // Draw prompt
         var x: u16 = 1;
         for (self.prompt) |c| {
             if (x >= size.width - 1) break;
-            view.setCell(@intCast(x), y, makeCell(c, self.input_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(x), y, Cell.simple(c, self.input_style.fg, self.bg_style.bg));
             x += 1;
         }
 
@@ -373,14 +373,14 @@ pub const CommandPalette = struct {
         if (self.query_len == 0) {
             for (self.placeholder) |c| {
                 if (x >= size.width - 1) break;
-                view.setCell(@intCast(x), y, makeCell(c, self.placeholder_style.fg, self.bg_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(c, self.placeholder_style.fg, self.bg_style.bg));
                 x += 1;
             }
         } else {
             const query = self.getQuery();
             for (query) |c| {
                 if (x >= size.width - 1) break;
-                view.setCell(@intCast(x), y, makeCell(c, self.input_style.fg, self.bg_style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(c, self.input_style.fg, self.bg_style.bg));
                 x += 1;
             }
         }
@@ -400,15 +400,15 @@ pub const CommandPalette = struct {
             }
         }
 
-        view.setCell(@intCast(size.width - 1), y, makeCell(box.vertical, self.bg_style.fg, self.bg_style.bg));
+        view.setCell(@intCast(size.width - 1), y, Cell.simple(box.vertical, self.bg_style.fg, self.bg_style.bg));
         y += 1;
 
         // Separator
-        view.setCell(0, y, makeCell('├', self.bg_style.fg, self.bg_style.bg));
+        view.setCell(0, y, Cell.simple('├', self.bg_style.fg, self.bg_style.bg));
         for (1..size.width - 1) |x_| {
-            view.setCell(@intCast(x_), y, makeCell(box.horizontal, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(x_), y, Cell.simple(box.horizontal, self.bg_style.fg, self.bg_style.bg));
         }
-        view.setCell(@intCast(size.width - 1), y, makeCell('┤', self.bg_style.fg, self.bg_style.bg));
+        view.setCell(@intCast(size.width - 1), y, Cell.simple('┤', self.bg_style.fg, self.bg_style.bg));
         y += 1;
 
         // Commands
@@ -421,23 +421,23 @@ pub const CommandPalette = struct {
             const is_selected = i == self.selected_index;
             const style = if (is_selected) self.selected_style else self.command_style;
 
-            view.setCell(0, y, makeCell(box.vertical, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(0, y, Cell.simple(box.vertical, self.bg_style.fg, self.bg_style.bg));
 
             // Clear line
             for (1..size.width - 1) |x_| {
-                view.setCell(@intCast(x_), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x_), y, Cell.simple(' ', style.fg, style.bg));
             }
 
             // Selection indicator
             if (is_selected) {
-                view.setCell(1, y, makeCell('›', style.fg, style.bg));
+                view.setCell(1, y, Cell.simple('›', style.fg, style.bg));
             }
 
             // Command label
             x = 3;
             for (cmd.label) |c| {
                 if (x >= size.width - 1) break;
-                view.setCell(@intCast(x), y, makeCell(c, style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(c, style.fg, style.bg));
                 x += 1;
             }
 
@@ -449,34 +449,24 @@ pub const CommandPalette = struct {
                     for (shortcut) |c| {
                         if (sx >= size.width - 1) break;
                         const sc_style = if (is_selected) style else self.shortcut_style;
-                        view.setCell(@intCast(sx), y, makeCell(c, sc_style.fg, style.bg));
+                        view.setCell(@intCast(sx), y, Cell.simple(c, sc_style.fg, style.bg));
                         sx += 1;
                     }
                 }
             }
 
-            view.setCell(@intCast(size.width - 1), y, makeCell(box.vertical, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(size.width - 1), y, Cell.simple(box.vertical, self.bg_style.fg, self.bg_style.bg));
             y += 1;
         }
 
         // Bottom border
         if (y < size.height) {
-            view.setCell(0, y, makeCell(box.bottom_left, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(0, y, Cell.simple(box.bottom_left, self.bg_style.fg, self.bg_style.bg));
             for (1..size.width - 1) |x_| {
-                view.setCell(@intCast(x_), y, makeCell(box.horizontal, self.bg_style.fg, self.bg_style.bg));
+                view.setCell(@intCast(x_), y, Cell.simple(box.horizontal, self.bg_style.fg, self.bg_style.bg));
             }
-            view.setCell(@intCast(size.width - 1), y, makeCell(box.bottom_right, self.bg_style.fg, self.bg_style.bg));
+            view.setCell(@intCast(size.width - 1), y, Cell.simple(box.bottom_right, self.bg_style.fg, self.bg_style.bg));
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {

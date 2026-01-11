@@ -327,12 +327,12 @@ pub const Autocomplete = struct {
         const dropdown_width = if (self.dropdown_width > 0) @min(self.dropdown_width, size.width) else size.width;
 
         // Top border
-        view.setCell(0, 1, makeCell(box.top_left, self.dropdown_style.fg, self.dropdown_style.bg));
+        view.setCell(0, 1, Cell.simple(box.top_left, self.dropdown_style.fg, self.dropdown_style.bg));
         var x: u16 = 1;
         while (x < dropdown_width - 1) : (x += 1) {
-            view.setCell(@intCast(x), 1, makeCell(box.horizontal, self.dropdown_style.fg, self.dropdown_style.bg));
+            view.setCell(@intCast(x), 1, Cell.simple(box.horizontal, self.dropdown_style.fg, self.dropdown_style.bg));
         }
-        view.setCell(@intCast(dropdown_width - 1), 1, makeCell(box.top_right, self.dropdown_style.fg, self.dropdown_style.bg));
+        view.setCell(@intCast(dropdown_width - 1), 1, Cell.simple(box.top_right, self.dropdown_style.fg, self.dropdown_style.bg));
 
         // Content rows
         var row: u16 = 0;
@@ -344,12 +344,12 @@ pub const Autocomplete = struct {
             const style = if (is_selected) self.selected_style else self.dropdown_style;
 
             // Left border
-            view.setCell(0, y, makeCell(box.vertical, self.dropdown_style.fg, self.dropdown_style.bg));
+            view.setCell(0, y, Cell.simple(box.vertical, self.dropdown_style.fg, self.dropdown_style.bg));
 
             // Fill background and content
             x = 1;
             while (x < dropdown_width - 1) : (x += 1) {
-                view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
             }
 
             // Print suggestion text
@@ -360,29 +360,19 @@ pub const Autocomplete = struct {
             }
 
             // Right border
-            view.setCell(@intCast(dropdown_width - 1), y, makeCell(box.vertical, self.dropdown_style.fg, self.dropdown_style.bg));
+            view.setCell(@intCast(dropdown_width - 1), y, Cell.simple(box.vertical, self.dropdown_style.fg, self.dropdown_style.bg));
         }
 
         // Bottom border
         const bottom_y: i32 = @as(i32, @intCast(visible)) + 2;
         if (bottom_y < size.height) {
-            view.setCell(0, bottom_y, makeCell(box.bottom_left, self.dropdown_style.fg, self.dropdown_style.bg));
+            view.setCell(0, bottom_y, Cell.simple(box.bottom_left, self.dropdown_style.fg, self.dropdown_style.bg));
             x = 1;
             while (x < dropdown_width - 1) : (x += 1) {
-                view.setCell(@intCast(x), bottom_y, makeCell(box.horizontal, self.dropdown_style.fg, self.dropdown_style.bg));
+                view.setCell(@intCast(x), bottom_y, Cell.simple(box.horizontal, self.dropdown_style.fg, self.dropdown_style.bg));
             }
-            view.setCell(@intCast(dropdown_width - 1), bottom_y, makeCell(box.bottom_right, self.dropdown_style.fg, self.dropdown_style.bg));
+            view.setCell(@intCast(dropdown_width - 1), bottom_y, Cell.simple(box.bottom_right, self.dropdown_style.fg, self.dropdown_style.bg));
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {

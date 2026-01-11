@@ -431,7 +431,7 @@ pub const Tree = struct {
 
             // Clear line
             for (0..size.width) |x| {
-                view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
             }
 
             var x: u16 = 0;
@@ -447,7 +447,7 @@ pub const Tree = struct {
                             self.guide_chars.vertical()
                         else
                             ' ';
-                        view.setCell(@intCast(x), y, makeCell(guide_char, self.text_style.fg, style.bg));
+                        view.setCell(@intCast(x), y, Cell.simple(guide_char, self.text_style.fg, style.bg));
                     }
                     x += 2;
                 }
@@ -458,9 +458,9 @@ pub const Tree = struct {
                         self.guide_chars.corner()
                     else
                         self.guide_chars.branch();
-                    view.setCell(@intCast(x), y, makeCell(branch_char, self.text_style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple(branch_char, self.text_style.fg, style.bg));
                     x += 1;
-                    view.setCell(@intCast(x), y, makeCell(self.guide_chars.horizontal(), self.text_style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple(self.guide_chars.horizontal(), self.text_style.fg, style.bg));
                     x += 1;
                 }
             } else if (row.depth > 1) {
@@ -479,24 +479,24 @@ pub const Tree = struct {
                         self.expanded_icon
                     else
                         self.collapsed_icon;
-                    view.setCell(@intCast(x), y, makeCell(icon_char, style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple(icon_char, style.fg, style.bg));
                     x += 1;
                 }
 
                 // Space
                 if (x < size.width) {
-                    view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                    view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                     x += 1;
                 }
 
                 // Draw optional node icon
                 if (node.icon) |icon| {
                     if (x < size.width) {
-                        view.setCell(@intCast(x), y, makeCell(icon, style.fg, style.bg));
+                        view.setCell(@intCast(x), y, Cell.simple(icon, style.fg, style.bg));
                         x += 1;
                     }
                     if (x < size.width) {
-                        view.setCell(@intCast(x), y, makeCell(' ', style.fg, style.bg));
+                        view.setCell(@intCast(x), y, Cell.simple(' ', style.fg, style.bg));
                         x += 1;
                     }
                 }
@@ -514,19 +514,9 @@ pub const Tree = struct {
         for (visible_count..size.height) |i| {
             const y: i32 = @intCast(i);
             for (0..size.width) |x_| {
-                view.setCell(@intCast(x_), y, makeCell(' ', self.text_style.fg, self.text_style.bg));
+                view.setCell(@intCast(x_), y, Cell.simple(' ', self.text_style.fg, self.text_style.bg));
             }
         }
-    }
-
-    fn makeCell(char: u21, fg: Cell.Color, bg: Cell.Color) Cell {
-        return .{
-            .char = char,
-            .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
-            .fg = fg,
-            .bg = bg,
-            .attrs = .{},
-        };
     }
 
     fn handleEvent(ptr: *anyopaque, event: Event.Event) Widget.EventResult {
