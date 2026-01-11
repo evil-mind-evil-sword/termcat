@@ -58,6 +58,8 @@ pub const Parser = @import("Parser.zig");
 pub const parse = Parser.parse;
 pub const parseWithEnv = Parser.parseWithEnv;
 pub const ParseResult = Parser.ParseResult;
+pub const parseApp = Parser.parseApp;
+pub const AppParseResult = Parser.AppParseResult;
 
 // Help generation
 pub const Help = @import("Help.zig");

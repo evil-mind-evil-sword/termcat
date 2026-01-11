@@ -4,7 +4,7 @@
 //! comptime-derived metadata from Command.zig.
 
 const std = @import("std");
-const Command = @import("Command.zig");
+const CommandMod = @import("Command.zig");
 const Error = @import("Error.zig");
 const CliError = Error.CliError;
 const ExitCode = Error.ExitCode;
@@ -125,7 +125,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
             // Handle short options at comptime by checking each field
             var found_short = false;
             inline for (type_info.@"struct".fields) |field| {
-                const meta = Command.getFieldMeta(T, field.name);
+                const meta = CommandMod.getFieldMeta(T, field.name);
                 if (meta.short) |s| {
                     if (s == short) {
                         found_short = true;
@@ -169,7 +169,7 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
     // Apply environment variable fallbacks (only if env is provided)
     if (@TypeOf(env) != @TypeOf(null)) {
         inline for (type_info.@"struct".fields) |field| {
-            const meta = Command.getFieldMeta(T, field.name);
+            const meta = CommandMod.getFieldMeta(T, field.name);
             if (meta.env) |env_var| {
                 // Only apply if field is still at default/null
                 if (shouldApplyEnvFallback(T, &result, field.name)) {
@@ -199,7 +199,7 @@ fn getPositionalFields(comptime T: type) []const []const u8 {
     comptime var fields: []const []const u8 = &.{};
 
     inline for (type_info.@"struct".fields) |field| {
-        if (Command.isPositional(T, field.name)) {
+        if (CommandMod.isPositional(T, field.name)) {
             fields = fields ++ &[_][]const u8{field.name};
         }
     }
@@ -213,7 +213,7 @@ fn getRequiredFields(comptime T: type) []const []const u8 {
     comptime var fields: []const []const u8 = &.{};
 
     inline for (type_info.@"struct".fields) |field| {
-        const meta = Command.getFieldMeta(T, field.name);
+        const meta = CommandMod.getFieldMeta(T, field.name);
         // A field is required if:
         // 1. Explicitly marked required in metadata, OR
         // 2. Non-optional type without a default value
@@ -259,7 +259,7 @@ fn isBoolFieldByName(comptime T: type, comptime name: []const u8) bool {
 fn getFieldNameByShort(comptime T: type, short: u8) ?[]const u8 {
     const type_info = @typeInfo(T);
     inline for (type_info.@"struct".fields) |field| {
-        const meta = Command.getFieldMeta(T, field.name);
+        const meta = CommandMod.getFieldMeta(T, field.name);
         if (meta.short) |s| {
             if (s == short) return field.name;
         }
@@ -450,6 +450,399 @@ test "required field provided succeeds" {
     switch (result) {
         .ok => |cmd| {
             try std.testing.expectEqualStrings("hello", cmd.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+// =============================================================================
+// App-level parsing with subcommands
+// =============================================================================
+
+/// Result of parsing app arguments with subcommands.
+pub fn AppParseResult(comptime App: type) type {
+    const GlobalOptions = if (@hasDecl(App, "GlobalOptions")) App.GlobalOptions else struct {};
+    const CommandUnion = if (@hasDecl(App, "Command")) App.Command else void;
+
+    return union(enum) {
+        ok: struct {
+            global: GlobalOptions,
+            command: CommandUnion,
+        },
+        err: CliError,
+        help,
+        version,
+        /// Help requested for a specific command
+        command_help: []const u8,
+    };
+}
+
+/// Parse app arguments with global options and subcommands.
+///
+/// Pattern: `app [global-opts] command [command-opts]`
+///
+/// Global options are ONLY parsed before the command name. This prevents
+/// global options from consuming subcommand tokens.
+///
+/// Example:
+/// ```zig
+/// const App = struct {
+///     pub const GlobalOptions = struct {
+///         url: ?[]const u8 = null,
+///     };
+///     pub const Command = Commands(.{
+///         .health = HealthCmd,
+///         .search = SearchCmd,
+///     });
+/// };
+/// const result = parseApp(App, args);
+/// ```
+pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App) {
+    const GlobalOptions = if (@hasDecl(App, "GlobalOptions")) App.GlobalOptions else struct {};
+    const CommandUnion = if (@hasDecl(App, "Command")) App.Command else @compileError("App must have a Command type");
+
+    var global: GlobalOptions = undefined;
+    const global_type_info = @typeInfo(GlobalOptions);
+
+    // Initialize global options with defaults
+    if (global_type_info == .@"struct") {
+        inline for (global_type_info.@"struct".fields) |field| {
+            if (field.defaultValue()) |default| {
+                @field(global, field.name) = default;
+            } else if (@typeInfo(field.type) == .optional) {
+                @field(global, field.name) = null;
+            } else if (field.type == []const u8) {
+                @field(global, field.name) = "";
+            } else if (field.type == bool) {
+                @field(global, field.name) = false;
+            } else if (@typeInfo(field.type) == .int) {
+                @field(global, field.name) = 0;
+            }
+        }
+    }
+
+    // Phase 1: Parse global options until we hit command name
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+
+        // Check for help (app-level)
+        if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
+            return .help;
+        }
+
+        // Check for version
+        if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
+            return .version;
+        }
+
+        // End of options marker
+        if (std.mem.eql(u8, arg, "--")) {
+            i += 1;
+            break;
+        }
+
+        // Long option with =
+        if (std.mem.startsWith(u8, arg, "--") and std.mem.indexOf(u8, arg, "=") != null) {
+            const eq_pos = std.mem.indexOf(u8, arg, "=").?;
+            const opt_name = arg[2..eq_pos];
+            const opt_value = arg[eq_pos + 1 ..];
+
+            if (setGlobalField(GlobalOptions, &global, opt_name, opt_value)) |err| {
+                return .{ .err = err };
+            }
+            continue;
+        }
+
+        // Long option
+        if (std.mem.startsWith(u8, arg, "--")) {
+            const opt_name = arg[2..];
+
+            if (isGlobalBoolField(GlobalOptions, opt_name)) {
+                if (setGlobalBoolField(GlobalOptions, &global, opt_name, true)) |err| {
+                    return .{ .err = err };
+                }
+            } else if (isGlobalField(GlobalOptions, opt_name)) {
+                // Needs a value
+                if (i + 1 >= args.len) {
+                    return .{ .err = CliError.usageError("missing value for option").withContext(arg) };
+                }
+                i += 1;
+                if (setGlobalField(GlobalOptions, &global, opt_name, args[i])) |err| {
+                    return .{ .err = err };
+                }
+            } else {
+                // Unknown global option - error (don't let it fall through to command)
+                return .{ .err = CliError.usageError("unknown global option").withContext(arg) };
+            }
+            continue;
+        }
+
+        // Short option
+        if (arg.len == 2 and arg[0] == '-' and arg[1] != '-') {
+            const short = arg[1];
+            var found = false;
+
+            if (global_type_info == .@"struct") {
+                inline for (global_type_info.@"struct".fields) |field| {
+                    const meta = CommandMod.getFieldMeta(GlobalOptions, field.name);
+                    if (meta.short) |s| {
+                        if (s == short) {
+                            found = true;
+                            if (field.type == bool) {
+                                @field(global, field.name) = true;
+                            } else {
+                                if (i + 1 >= args.len) {
+                                    return .{ .err = CliError.usageError("missing value for option").withContext(arg) };
+                                }
+                                i += 1;
+                                if (parseValue(field.type, args[i])) |parsed| {
+                                    @field(global, field.name) = parsed;
+                                } else |_| {
+                                    return .{ .err = CliError.usageError("invalid value").withContext(args[i]) };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!found) {
+                return .{ .err = CliError.usageError("unknown global option").withContext(arg) };
+            }
+            continue;
+        }
+
+        // Non-option argument - this is the command name
+        break;
+    }
+
+    // Phase 2: Identify and dispatch to command
+    if (i >= args.len) {
+        return .{ .err = CliError.usageError("missing command") };
+    }
+
+    const cmd_name = args[i];
+    const cmd_args = args[i + 1 ..];
+
+    // Check for command-specific help
+    if (cmd_args.len > 0 and (std.mem.eql(u8, cmd_args[0], "-h") or std.mem.eql(u8, cmd_args[0], "--help"))) {
+        return .{ .command_help = cmd_name };
+    }
+
+    // Match command name against union fields
+    const union_info = @typeInfo(CommandUnion);
+    if (union_info != .@"union") {
+        @compileError("App.Command must be a union type (use Commands())");
+    }
+
+    inline for (union_info.@"union".fields) |field| {
+        if (std.mem.eql(u8, field.name, cmd_name)) {
+            // Parse command-specific arguments
+            const cmd_result = parse(field.type, cmd_args);
+            switch (cmd_result) {
+                .ok => |cmd| {
+                    return .{ .ok = .{
+                        .global = global,
+                        .command = @unionInit(CommandUnion, field.name, cmd),
+                    } };
+                },
+                .err => |err| return .{ .err = err },
+                .help => return .{ .command_help = cmd_name },
+                .version => return .version,
+            }
+        }
+
+        // Check aliases
+        const cmd_meta = CommandMod.getCommandMeta(field.type);
+        for (cmd_meta.aliases) |alias| {
+            if (std.mem.eql(u8, alias, cmd_name)) {
+                const cmd_result = parse(field.type, cmd_args);
+                switch (cmd_result) {
+                    .ok => |cmd| {
+                        return .{ .ok = .{
+                            .global = global,
+                            .command = @unionInit(CommandUnion, field.name, cmd),
+                        } };
+                    },
+                    .err => |err| return .{ .err = err },
+                    .help => return .{ .command_help = field.name },
+                    .version => return .version,
+                }
+            }
+        }
+    }
+
+    return .{ .err = CliError.usageError("unknown command").withContext(cmd_name) };
+}
+
+// Helper functions for global option parsing
+
+fn isGlobalField(comptime GlobalOptions: type, name: []const u8) bool {
+    const type_info = @typeInfo(GlobalOptions);
+    if (type_info != .@"struct") return false;
+
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn isGlobalBoolField(comptime GlobalOptions: type, name: []const u8) bool {
+    const type_info = @typeInfo(GlobalOptions);
+    if (type_info != .@"struct") return false;
+
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, name) and field.type == bool) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn setGlobalField(comptime GlobalOptions: type, global: *GlobalOptions, name: []const u8, value: []const u8) ?CliError {
+    const type_info = @typeInfo(GlobalOptions);
+    if (type_info != .@"struct") return CliError.usageError("invalid global options type");
+
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, name)) {
+            if (parseValue(field.type, value)) |parsed| {
+                @field(global, field.name) = parsed;
+                return null;
+            } else |_| {
+                return CliError.usageError("invalid value for option").withContext(value);
+            }
+        }
+    }
+    return CliError.usageError("unknown global option").withContext(name);
+}
+
+fn setGlobalBoolField(comptime GlobalOptions: type, global: *GlobalOptions, name: []const u8, value: bool) ?CliError {
+    const type_info = @typeInfo(GlobalOptions);
+    if (type_info != .@"struct") return CliError.usageError("invalid global options type");
+
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, name) and field.type == bool) {
+            @field(global, field.name) = value;
+            return null;
+        }
+    }
+    return CliError.usageError("unknown global flag").withContext(name);
+}
+
+test "parseApp basic" {
+    const HealthCmd = struct {
+        verbose: bool = false,
+        pub const meta = .{ .name = "health", .description = "Check health" };
+    };
+
+    const SearchCmd = struct {
+        query: []const u8 = "",
+        limit: u32 = 10,
+        pub const positional = .{.query};
+        pub const meta = .{ .name = "search", .description = "Search items" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            url: ?[]const u8 = null,
+            verbose: bool = false,
+            pub const fields = .{
+                .url = .{ .description = "Server URL" },
+                .verbose = .{ .short = 'v', .description = "Verbose output" },
+            };
+        };
+
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+            .search = SearchCmd,
+        });
+    };
+
+    // Test: global option before command
+    const result1 = parseApp(TestApp, &.{ "--url", "http://localhost", "health" });
+    switch (result1) {
+        .ok => |r| {
+            try std.testing.expectEqualStrings("http://localhost", r.global.url.?);
+            try std.testing.expect(r.command == .health);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Test: command with its own args
+    const result2 = parseApp(TestApp, &.{ "search", "foo", "--limit", "5" });
+    switch (result2) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .search);
+            try std.testing.expectEqualStrings("foo", r.command.search.query);
+            try std.testing.expectEqual(@as(u32, 5), r.command.search.limit);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp rejects global option after command" {
+    const HealthCmd = struct {
+        verbose: bool = false,
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            url: ?[]const u8 = null,
+        };
+
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    // --url after command should fail (unknown option for health command)
+    const result = parseApp(TestApp, &.{ "health", "--url", "http://x" });
+    switch (result) {
+        .err => |err| {
+            // health command doesn't know --url, so it fails
+            try std.testing.expect(std.mem.indexOf(u8, err.message, "unknown") != null or
+                std.mem.indexOf(u8, err.message, "Unknown") != null);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp unknown command" {
+    const HealthCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    const result = parseApp(TestApp, &.{"unknown"});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("unknown command", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp missing command" {
+    const HealthCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+        });
+    };
+
+    const result = parseApp(TestApp, &.{});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("missing command", err.message);
         },
         else => try std.testing.expect(false),
     }
