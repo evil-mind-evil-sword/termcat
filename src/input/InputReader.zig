@@ -178,7 +178,8 @@ pub fn init(allocator: std.mem.Allocator, options: Options) !InputReader {
     errdefer self.exitRawMode() catch {};
 
     // Install crash-safe signal handler for terminal restore
-    signal.install(tty_fd, orig_termios);
+    // InputReader doesn't use alternate screen, so pass false
+    signal.installWithOptions(tty_fd, orig_termios, false);
     errdefer signal.uninstall();
 
     // Install SIGWINCH handler if requested

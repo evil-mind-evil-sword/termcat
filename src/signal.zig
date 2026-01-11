@@ -18,6 +18,9 @@ var global_termios_valid: std.atomic.Value(bool) = std.atomic.Value(bool).init(f
 /// Reference count for signal handler installation
 var signal_handler_refcount: std.atomic.Value(usize) = std.atomic.Value(usize).init(0);
 
+/// Whether alternate screen is in use (affects cleanup sequence)
+var global_uses_alt_screen: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
 /// Original signal action handlers (saved when we install)
 var original_sigactions: struct {
     int: posix.Sigaction = undefined,
@@ -30,8 +33,15 @@ var original_sigactions: struct {
     quit_valid: bool = false,
 } = .{};
 
-/// Call this during terminal init to enable crash-safe restore
+/// Call this during terminal init to enable crash-safe restore.
+/// Set uses_alt_screen to true if the terminal enters alternate screen buffer.
 pub fn install(tty_fd: posix.fd_t, orig_termios: posix.termios) void {
+    installWithOptions(tty_fd, orig_termios, true);
+}
+
+/// Install with explicit alternate screen option.
+/// InputReader should call this with uses_alt_screen=false.
+pub fn installWithOptions(tty_fd: posix.fd_t, orig_termios: posix.termios, uses_alt_screen: bool) void {
     // Atomically increment refcount
     const prev_count = signal_handler_refcount.fetchAdd(1, .acq_rel);
 
@@ -40,6 +50,7 @@ pub fn install(tty_fd: posix.fd_t, orig_termios: posix.termios) void {
         global_tty_fd.store(tty_fd, .release);
         global_orig_termios = orig_termios;
         global_termios_valid.store(true, .release);
+        global_uses_alt_screen.store(uses_alt_screen, .release);
         installSignalHandlers();
     }
 }
@@ -88,12 +99,21 @@ fn signalHandler(sig: i32) callconv(.c) void {
 pub fn restore() void {
     const fd = global_tty_fd.load(.acquire);
     if (fd >= 0) {
-        // Write full cleanup sequence:
+        // Write cleanup sequence appropriate for the mode:
         // - Disable synchronized output, focus events, bracketed paste
         // - Disable mouse tracking (any-event mode + SGR mode)
-        // - Show cursor, reset attributes, exit alternate screen
-        const cleanup_seq = "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l";
-        _ = posix.write(fd, cleanup_seq) catch {};
+        // - Show cursor, reset attributes
+        // - Exit alternate screen (only if we entered it)
+        const uses_alt = global_uses_alt_screen.load(.acquire);
+        if (uses_alt) {
+            // Full cleanup including alternate screen exit
+            const cleanup_seq = "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l";
+            _ = posix.write(fd, cleanup_seq) catch {};
+        } else {
+            // Minimal cleanup for InputReader (no alternate screen)
+            const cleanup_seq = "\x1b[?25h\x1b[0m";
+            _ = posix.write(fd, cleanup_seq) catch {};
+        }
 
         // Attempt to restore termios (raw mode -> cooked mode)
         // Note: tcsetattr is not strictly async-signal-safe per POSIX,
