@@ -273,12 +273,23 @@ pub fn Commands(comptime cmd_defs: anytype) type {
     });
 }
 
-/// Marker for subcommand groups.
+/// Create a subcommand group.
+///
+/// Returns a Commands union directly. In parseApp, subcommand groups are
+/// detected by checking if the field type is a union (regular commands are structs).
+///
+/// Example:
+/// ```zig
+/// pub const Command = Commands(.{
+///     .health = HealthCmd,         // struct - regular command
+///     .bib = Subcommand(.{         // union - subcommand group
+///         .add = BibAddCmd,
+///         .remove = BibRemoveCmd,
+///     }),
+/// });
+/// ```
 pub fn Subcommand(comptime sub_defs: anytype) type {
-    return struct {
-        pub const commands = Commands(sub_defs);
-        pub const is_subcommand_group = true;
-    };
+    return Commands(sub_defs);
 }
 
 test "getCommandMeta" {

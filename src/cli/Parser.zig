@@ -687,25 +687,25 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
 
     inline for (union_info.@"union".fields) |field| {
         if (std.mem.eql(u8, field.name, cmd_name)) {
-            // Parse command-specific arguments
-            const cmd_result = parse(field.type, cmd_args);
-            switch (cmd_result) {
-                .ok => |cmd| {
-                    return .{ .ok = .{
-                        .global = global,
-                        .command = @unionInit(CommandUnion, field.name, cmd),
-                    } };
-                },
-                .err => |err| return .{ .err = err },
-                .help => return .{ .command_help = cmd_name },
-                .version => return .version,
-            }
-        }
-
-        // Check aliases
-        const cmd_meta = CommandMod.getCommandMeta(field.type);
-        for (cmd_meta.aliases) |alias| {
-            if (std.mem.eql(u8, alias, cmd_name)) {
+            // Check if this is a subcommand group (union type = subcommand, struct type = command)
+            const field_type_info = @typeInfo(field.type);
+            if (field_type_info == .@"union") {
+                // Parse nested subcommand
+                const sub_result = parseSubcommandGroup(field.type, cmd_name, cmd_args);
+                switch (sub_result) {
+                    .ok => |sub| {
+                        return .{ .ok = .{
+                            .global = global,
+                            .command = @unionInit(CommandUnion, field.name, sub),
+                        } };
+                    },
+                    .err => |err| return .{ .err = err },
+                    .help => return .{ .command_help = cmd_name },
+                    .version => return .version,
+                    .command_help => |sub_cmd| return .{ .command_help = sub_cmd },
+                }
+            } else {
+                // Parse command-specific arguments
                 const cmd_result = parse(field.type, cmd_args);
                 switch (cmd_result) {
                     .ok => |cmd| {
@@ -715,6 +715,104 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                         } };
                     },
                     .err => |err| return .{ .err = err },
+                    .help => return .{ .command_help = cmd_name },
+                    .version => return .version,
+                }
+            }
+        }
+
+        // Check aliases (only for struct command types, not subcommand groups)
+        const field_type_info = @typeInfo(field.type);
+        if (field_type_info == .@"struct") {
+            const cmd_meta = CommandMod.getCommandMeta(field.type);
+            for (cmd_meta.aliases) |alias| {
+                if (std.mem.eql(u8, alias, cmd_name)) {
+                    const cmd_result = parse(field.type, cmd_args);
+                    switch (cmd_result) {
+                        .ok => |cmd| {
+                            return .{ .ok = .{
+                                .global = global,
+                                .command = @unionInit(CommandUnion, field.name, cmd),
+                            } };
+                        },
+                        .err => |err| return .{ .err = err },
+                        .help => return .{ .command_help = field.name },
+                        .version => return .version,
+                    }
+                }
+            }
+        }
+    }
+
+    return .{ .err = CliError.usageError("unknown command").withContext(cmd_name) };
+}
+
+/// Result of parsing a subcommand group.
+fn SubcommandGroupResult(comptime SubCommands: type) type {
+    return union(enum) {
+        ok: SubCommands,
+        err: CliError,
+        help,
+        version,
+        command_help: []const u8,
+    };
+}
+
+/// Parse a subcommand group (e.g., "bib add" where "bib" is the group).
+/// SubCommands is the union type created by Commands() or Subcommand().
+fn parseSubcommandGroup(
+    comptime SubCommands: type,
+    parent_name: []const u8,
+    args: []const []const u8,
+) SubcommandGroupResult(SubCommands) {
+    const sub_union_info = @typeInfo(SubCommands);
+
+    if (sub_union_info != .@"union") {
+        @compileError("Subcommand group must be a Commands union");
+    }
+
+    // Check for help on the group itself
+    if (args.len > 0 and (std.mem.eql(u8, args[0], "-h") or std.mem.eql(u8, args[0], "--help"))) {
+        return .help;
+    }
+
+    // Need at least one arg for the subcommand name
+    if (args.len == 0) {
+        return .{ .err = CliError.usageError("missing subcommand").withContext(parent_name) };
+    }
+
+    const sub_cmd_name = args[0];
+    const sub_cmd_args = args[1..];
+
+    // Check for subcommand-specific help
+    if (sub_cmd_args.len > 0 and (std.mem.eql(u8, sub_cmd_args[0], "-h") or std.mem.eql(u8, sub_cmd_args[0], "--help"))) {
+        return .{ .command_help = sub_cmd_name };
+    }
+
+    // Match subcommand name
+    inline for (sub_union_info.@"union".fields) |field| {
+        if (std.mem.eql(u8, field.name, sub_cmd_name)) {
+            const cmd_result = parse(field.type, sub_cmd_args);
+            switch (cmd_result) {
+                .ok => |cmd| {
+                    return .{ .ok = @unionInit(SubCommands, field.name, cmd) };
+                },
+                .err => |err| return .{ .err = err },
+                .help => return .{ .command_help = sub_cmd_name },
+                .version => return .version,
+            }
+        }
+
+        // Check aliases
+        const cmd_meta = CommandMod.getCommandMeta(field.type);
+        for (cmd_meta.aliases) |alias| {
+            if (std.mem.eql(u8, alias, sub_cmd_name)) {
+                const cmd_result = parse(field.type, sub_cmd_args);
+                switch (cmd_result) {
+                    .ok => |cmd| {
+                        return .{ .ok = @unionInit(SubCommands, field.name, cmd) };
+                    },
+                    .err => |err| return .{ .err = err },
                     .help => return .{ .command_help = field.name },
                     .version => return .version,
                 }
@@ -722,7 +820,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
         }
     }
 
-    return .{ .err = CliError.usageError("unknown command").withContext(cmd_name) };
+    return .{ .err = CliError.usageError("unknown subcommand").withContext(sub_cmd_name) };
 }
 
 // Helper functions for global option parsing
@@ -1077,6 +1175,142 @@ test "parse negative number as positional" {
     switch (result) {
         .ok => |cmd| {
             try std.testing.expectEqual(@as(i32, -100), cmd.value);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested subcommand group" {
+    const BibAddCmd = struct {
+        file: []const u8 = "",
+        pub const positional = .{.file};
+        pub const meta = .{ .name = "add", .description = "Add bibliography entry" };
+    };
+
+    const BibRemoveCmd = struct {
+        key: []const u8 = "",
+        pub const positional = .{.key};
+        pub const meta = .{ .name = "remove", .description = "Remove bibliography entry" };
+    };
+
+    const HealthCmd = struct {
+        verbose: bool = false,
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .health = HealthCmd,
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+                .remove = BibRemoveCmd,
+            }),
+        });
+    };
+
+    // Test: "app bib add file.bib"
+    const result1 = parseApp(TestApp, &.{ "bib", "add", "refs.bib" });
+    switch (result1) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .bib);
+            try std.testing.expect(r.command.bib == .add);
+            try std.testing.expectEqualStrings("refs.bib", r.command.bib.add.file);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Test: "app bib remove key123"
+    const result2 = parseApp(TestApp, &.{ "bib", "remove", "key123" });
+    switch (result2) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .bib);
+            try std.testing.expect(r.command.bib == .remove);
+            try std.testing.expectEqualStrings("key123", r.command.bib.remove.key);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // Test: regular command still works
+    const result3 = parseApp(TestApp, &.{ "health", "--verbose" });
+    switch (result3) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .health);
+            try std.testing.expect(r.command.health.verbose);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested subcommand missing subcommand" {
+    const BibAddCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+            }),
+        });
+    };
+
+    // "app bib" without subcommand should error
+    const result = parseApp(TestApp, &.{"bib"});
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("missing subcommand", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested subcommand unknown subcommand" {
+    const BibAddCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+            }),
+        });
+    };
+
+    // "app bib unknown" should error
+    const result = parseApp(TestApp, &.{ "bib", "unknown" });
+    switch (result) {
+        .err => |err| {
+            try std.testing.expectEqualStrings("unknown subcommand", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp nested subcommand help" {
+    const BibAddCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+            }),
+        });
+    };
+
+    // "app bib --help" should return help for bib group
+    const result1 = parseApp(TestApp, &.{ "bib", "--help" });
+    switch (result1) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("bib", cmd_name);
+        },
+        else => try std.testing.expect(false),
+    }
+
+    // "app bib add --help" should return help for add subcommand
+    const result2 = parseApp(TestApp, &.{ "bib", "add", "--help" });
+    switch (result2) {
+        .command_help => |cmd_name| {
+            try std.testing.expectEqualStrings("add", cmd_name);
         },
         else => try std.testing.expect(false),
     }
