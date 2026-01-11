@@ -2,8 +2,53 @@
 //!
 //! Provides types for declaratively defining CLI commands as Zig structs,
 //! with automatic derivation of parsing tables and help text.
+//!
+//! ## Variadic Positionals
+//!
+//! Use `VariadicSlice` for commands that accept multiple positional arguments:
+//!
+//! ```zig
+//! const CopyCmd = struct {
+//!     dest: []const u8,
+//!     files: VariadicSlice,  // Captures all remaining positionals
+//!
+//!     pub const positional = .{ .dest, .files };
+//! };
+//!
+//! // After parsing:
+//! const file_args = result.files.items(args);  // Zero-copy slice
+//! ```
 
 const std = @import("std");
+
+/// Zero-copy reference to variadic positional arguments.
+///
+/// Stores indices into the original args array, avoiding allocation.
+/// The variadic field must be the last positional argument.
+pub const VariadicSlice = struct {
+    /// Start index in args array (inclusive).
+    start: usize = 0,
+    /// End index in args array (exclusive).
+    end: usize = 0,
+
+    /// Get the actual argument values from the original args array.
+    pub fn items(self: @This(), args: []const []const u8) []const []const u8 {
+        if (self.start >= args.len) return &.{};
+        const safe_end = @min(self.end, args.len);
+        return args[self.start..safe_end];
+    }
+
+    /// Returns true if no variadic arguments were captured.
+    pub fn isEmpty(self: @This()) bool {
+        return self.start >= self.end;
+    }
+
+    /// Returns the number of captured arguments.
+    pub fn len(self: @This()) usize {
+        if (self.start >= self.end) return 0;
+        return self.end - self.start;
+    }
+};
 
 /// Field metadata for argument configuration.
 pub const FieldMeta = struct {
@@ -91,6 +136,8 @@ pub const PositionalSpec = struct {
     description: []const u8,
     /// Value placeholder.
     value_name: []const u8,
+    /// Whether this positional captures all remaining args.
+    variadic: bool = false,
 };
 
 /// Get command metadata from a type.
@@ -192,6 +239,19 @@ pub fn isPositional(comptime T: type, comptime field_name: []const u8) bool {
     return false;
 }
 
+/// Check if a field is a variadic positional (VariadicSlice type).
+pub fn isVariadicField(comptime T: type, comptime field_name: []const u8) bool {
+    const type_info = @typeInfo(T);
+    if (type_info != .@"struct") return false;
+
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, field_name)) {
+            return field.type == VariadicSlice;
+        }
+    }
+    return false;
+}
+
 /// Get option spec for a field.
 pub fn getOptionSpec(comptime T: type, comptime field: std.builtin.Type.StructField) OptionSpec {
     const meta = getFieldMeta(T, field.name);
@@ -215,12 +275,15 @@ pub fn getOptionSpec(comptime T: type, comptime field: std.builtin.Type.StructFi
 pub fn getPositionalSpec(comptime T: type, comptime field: std.builtin.Type.StructField) PositionalSpec {
     const meta = getFieldMeta(T, field.name);
     const is_optional = @typeInfo(field.type) == .optional;
+    const is_variadic = field.type == VariadicSlice;
 
     return .{
         .name = field.name,
-        .required = !is_optional and field.default_value_ptr == null,
+        // Variadic fields are not required (can be empty)
+        .required = !is_optional and !is_variadic and field.default_value_ptr == null,
         .description = meta.description,
-        .value_name = meta.value_name orelse ("<" ++ field.name ++ ">"),
+        .value_name = meta.value_name orelse ("<" ++ field.name ++ (if (is_variadic) ">..." else ">")),
+        .variadic = is_variadic,
     };
 }
 
@@ -368,4 +431,67 @@ test "Commands union" {
     const list_cmd = Cmd{ .list = .{ .all = true } };
     try std.testing.expect(list_cmd == .list);
     try std.testing.expect(list_cmd.list.all);
+}
+
+test "VariadicSlice" {
+    const args = &[_][]const u8{ "cmd", "file1.txt", "file2.txt", "file3.txt" };
+
+    // Normal case
+    const slice = VariadicSlice{ .start = 1, .end = 4 };
+    const items = slice.items(args);
+    try std.testing.expectEqual(@as(usize, 3), items.len);
+    try std.testing.expectEqualStrings("file1.txt", items[0]);
+    try std.testing.expectEqualStrings("file3.txt", items[2]);
+    try std.testing.expectEqual(@as(usize, 3), slice.len());
+    try std.testing.expect(!slice.isEmpty());
+
+    // Empty case
+    const empty = VariadicSlice{ .start = 1, .end = 1 };
+    try std.testing.expectEqual(@as(usize, 0), empty.items(args).len);
+    try std.testing.expect(empty.isEmpty());
+
+    // Bounds safety
+    const beyond = VariadicSlice{ .start = 10, .end = 20 };
+    try std.testing.expectEqual(@as(usize, 0), beyond.items(args).len);
+}
+
+test "isVariadicField" {
+    const TestCmd = struct {
+        dest: []const u8 = "",
+        files: VariadicSlice = .{},
+        verbose: bool = false,
+
+        pub const positional = .{ .dest, .files };
+    };
+
+    try std.testing.expect(isVariadicField(TestCmd, "files"));
+    try std.testing.expect(!isVariadicField(TestCmd, "dest"));
+    try std.testing.expect(!isVariadicField(TestCmd, "verbose"));
+}
+
+test "getPositionalSpec variadic" {
+    const TestCmd = struct {
+        dest: []const u8,
+        files: VariadicSlice = .{},
+
+        pub const positional = .{ .dest, .files };
+        pub const fields = .{
+            .files = .{ .description = "Input files" },
+        };
+    };
+
+    const type_info = @typeInfo(TestCmd);
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, "files")) {
+            const spec = getPositionalSpec(TestCmd, field);
+            try std.testing.expect(spec.variadic);
+            try std.testing.expect(!spec.required); // Variadic is never required
+            try std.testing.expectEqualStrings("<files>...", spec.value_name);
+        }
+        if (std.mem.eql(u8, field.name, "dest")) {
+            const spec = getPositionalSpec(TestCmd, field);
+            try std.testing.expect(!spec.variadic);
+            try std.testing.expect(spec.required);
+        }
+    }
 }

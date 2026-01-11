@@ -25,10 +25,11 @@ pub fn generateHelp(comptime T: type, writer: anytype) !void {
     inline for (type_info.@"struct".fields) |field| {
         if (CommandMod.isPositional(T, field.name)) {
             const pos_spec = CommandMod.getPositionalSpec(T, field);
+            const suffix = if (pos_spec.variadic) "..." else "";
             if (pos_spec.required) {
-                try writer.print(" <{s}>", .{field.name});
+                try writer.print(" <{s}>{s}", .{ field.name, suffix });
             } else {
-                try writer.print(" [{s}]", .{field.name});
+                try writer.print(" [{s}]{s}", .{ field.name, suffix });
             }
         }
     }
@@ -53,6 +54,7 @@ pub fn generateHelp(comptime T: type, writer: anytype) !void {
                 has_positionals = true;
             }
             const pos_spec = CommandMod.getPositionalSpec(T, field);
+            // value_name already includes "..." suffix for variadic fields
             try writer.print("  {s:<20}  {s}\n", .{ pos_spec.value_name, pos_spec.description });
         }
     }
@@ -143,8 +145,14 @@ pub fn generateAppHelp(comptime App: type, writer: anytype) !void {
         try writer.print("{s}\n", .{meta.description});
     }
 
-    // Usage
-    try writer.print("\nUsage: {s} <command> [options]\n", .{meta.name});
+    // Usage - show default command pattern if defined
+    if (@hasDecl(App, "default_command")) {
+        // Show both default mode and explicit command mode
+        try writer.print("\nUsage: {s} [OPTIONS] [ARGS...]  (default: {s})\n", .{ meta.name, App.default_command });
+        try writer.print("       {s} <command> [OPTIONS]\n", .{meta.name});
+    } else {
+        try writer.print("\nUsage: {s} <command> [OPTIONS]\n", .{meta.name});
+    }
 
     // Commands
     if (@hasDecl(App, "Command")) {
@@ -152,12 +160,16 @@ pub fn generateAppHelp(comptime App: type, writer: anytype) !void {
 
         const CmdUnion = App.Command;
         const union_info = @typeInfo(CmdUnion);
+        const default_cmd = if (@hasDecl(App, "default_command")) App.default_command else "";
 
         if (union_info == .@"union") {
             inline for (union_info.@"union".fields) |field| {
                 const cmd_meta = CommandMod.getCommandMeta(field.type);
                 if (!cmd_meta.hidden) {
-                    try writer.print("  {s:<16}  {s}\n", .{ field.name, cmd_meta.description });
+                    // Mark default command
+                    const is_default = std.mem.eql(u8, field.name, default_cmd);
+                    const suffix = if (is_default) " (default)" else "";
+                    try writer.print("  {s:<16}  {s}{s}\n", .{ field.name, cmd_meta.description, suffix });
                 }
             }
         }

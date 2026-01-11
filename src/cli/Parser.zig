@@ -54,6 +54,67 @@ pub fn parse(comptime T: type, args: []const []const u8) ParseResult(T) {
     return parseWithEnv(T, args, null);
 }
 
+/// Result of parseWithHelp - either parsed value or "handled" meaning help/version was printed.
+pub fn ParseWithHelpResult(comptime T: type) type {
+    return union(enum) {
+        ok: T,
+        err: CliError,
+        handled: void, // Help or version was printed
+    };
+}
+
+/// Parse arguments and handle help/version automatically.
+///
+/// This is a convenience wrapper for standalone command parsing that prints
+/// help and version information automatically, avoiding the need for
+/// parseApp() when you just have global options or a single command.
+///
+/// Example:
+/// ```zig
+/// const Options = struct {
+///     verbose: bool = false,
+///     file: []const u8,
+///     pub const positional = .{.file};
+///     pub const meta = .{ .name = "mytool", .version = "1.0.0" };
+/// };
+///
+/// const result = parseWithHelp(Options, args, std.io.getStdErr().writer());
+/// switch (result) {
+///     .ok => |opts| runWithOptions(opts),
+///     .err => |err| { printError(err); return 1; },
+///     .handled => return 0, // Help/version was printed
+/// }
+/// ```
+pub fn parseWithHelp(
+    comptime T: type,
+    args: []const []const u8,
+    writer: anytype,
+) ParseWithHelpResult(T) {
+    const Help = @import("Help.zig");
+
+    const result = parse(T, args);
+    switch (result) {
+        .ok => |v| return .{ .ok = v },
+        .err => |e| return .{ .err = e },
+        .help => {
+            const help_text = Help.generateHelp(T);
+            writer.writeAll(help_text) catch {};
+            return .handled;
+        },
+        .version => {
+            // Try to get version from meta declaration
+            if (@hasDecl(T, "meta")) {
+                const meta = T.meta;
+                if (@hasField(@TypeOf(meta), "version")) {
+                    const name = if (@hasField(@TypeOf(meta), "name")) meta.name else @typeName(T);
+                    writer.print("{s} {s}\n", .{ name, meta.version }) catch {};
+                }
+            }
+            return .handled;
+        },
+    }
+}
+
 /// Parse arguments with explicit environment.
 pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) ParseResult(T) {
     var result: T = undefined;
@@ -90,6 +151,9 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
             @field(result, field.name) = false;
         } else if (@typeInfo(field.type) == .int) {
             @field(result, field.name) = 0;
+        } else if (field.type == CommandMod.VariadicSlice) {
+            // Initialize variadic slices to empty
+            @field(result, field.name) = .{ .start = 0, .end = 0 };
         }
         // Other types left undefined - they must be set during parsing
     }
@@ -111,6 +175,26 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
         // Check for version
         if (std.mem.eql(u8, arg, "-V") or std.mem.eql(u8, arg, "--version")) {
             return .version;
+        }
+
+        // End-of-options marker: treat all remaining args as positional
+        // Must check BEFORE long option parsing since "--" matches startsWith("--")
+        if (std.mem.eql(u8, arg, "--")) {
+            i += 1;
+            // Process remaining args as positionals - after --, don't stop at option-like strings
+            while (i < args.len) : (i += 1) {
+                if (positional_index < positional_fields.len) {
+                    // Special handling: after --, variadic consumes ALL remaining args
+                    const handled = handlePositionalArgAfterSeparator(T, positional_fields, &result, &positional_index, required_fields, &fields_set, i, args);
+                    if (handled.is_error) {
+                        return .{ .err = handled.err.? };
+                    }
+                    if (handled.consumed_rest) break;
+                } else {
+                    return .{ .err = CliError.usageError("unexpected argument").withContext(args[i]) };
+                }
+            }
+            break; // Done processing after --
         }
 
         // Long option with =
@@ -194,12 +278,17 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
 
         // Positional argument
         if (positional_index < positional_fields.len) {
-            const field_name = positional_fields[positional_index];
-            markFieldSet(required_fields, &fields_set, field_name);
-            if (setFieldByName(T, &result, field_name, arg)) |err| {
-                return .{ .err = err };
+            const handled = handlePositionalArg(T, positional_fields, &result, &positional_index, required_fields, &fields_set, i, args);
+            if (handled.is_error) {
+                return .{ .err = handled.err.? };
             }
-            positional_index += 1;
+            if (handled.consumed_rest) {
+                break; // Variadic consumed remaining args
+            }
+            // Update i if variadic consumed multiple args
+            if (handled.new_index) |new_i| {
+                i = new_i;
+            }
         } else {
             return .{ .err = CliError.usageError("unexpected argument").withContext(arg) };
         }
@@ -244,6 +333,113 @@ fn getPositionalFields(comptime T: type) []const []const u8 {
     }
 
     return fields;
+}
+
+/// Result of handling a positional argument.
+const PositionalHandleResult = struct {
+    is_error: bool = false,
+    err: ?CliError = null,
+    consumed_rest: bool = false,
+    new_index: ?usize = null,
+};
+
+/// Handle a single positional argument, checking each positional field at comptime.
+fn handlePositionalArg(
+    comptime T: type,
+    comptime positional_fields: []const []const u8,
+    result: *T,
+    positional_index: *usize,
+    comptime required_fields: []const []const u8,
+    fields_set: *[required_fields.len]bool,
+    current_idx: usize,
+    args: []const []const u8,
+) PositionalHandleResult {
+    // Check each positional field at comptime
+    inline for (positional_fields, 0..) |field_name, field_idx| {
+        if (positional_index.* == field_idx) {
+            markFieldSet(required_fields, fields_set, field_name);
+
+            // Check at comptime if this specific field is variadic
+            if (comptime CommandMod.isVariadicField(T, field_name)) {
+                // Find where positional args end
+                var end_idx = current_idx;
+                while (end_idx < args.len) : (end_idx += 1) {
+                    const next_arg = args[end_idx];
+                    // Stop at options (but not --, negative numbers, or single -)
+                    if (next_arg.len > 1 and next_arg[0] == '-' and next_arg[1] != '-' and !std.ascii.isDigit(next_arg[1])) {
+                        break;
+                    }
+                    if (next_arg.len > 2 and std.mem.startsWith(u8, next_arg, "--")) {
+                        break;
+                    }
+                }
+                if (setVariadicField(T, result, field_name, current_idx, end_idx)) |err| {
+                    return .{ .is_error = true, .err = err };
+                }
+                positional_index.* += 1;
+                return .{ .consumed_rest = (end_idx >= args.len), .new_index = end_idx - 1 };
+            } else {
+                // Regular positional
+                if (setFieldByName(T, result, field_name, args[current_idx])) |err| {
+                    return .{ .is_error = true, .err = err };
+                }
+                positional_index.* += 1;
+                return .{};
+            }
+        }
+    }
+    return .{};
+}
+
+/// Handle positional argument after -- separator (variadic consumes ALL remaining).
+fn handlePositionalArgAfterSeparator(
+    comptime T: type,
+    comptime positional_fields: []const []const u8,
+    result: *T,
+    positional_index: *usize,
+    comptime required_fields: []const []const u8,
+    fields_set: *[required_fields.len]bool,
+    current_idx: usize,
+    args: []const []const u8,
+) PositionalHandleResult {
+    inline for (positional_fields, 0..) |field_name, field_idx| {
+        if (positional_index.* == field_idx) {
+            markFieldSet(required_fields, fields_set, field_name);
+
+            if (comptime CommandMod.isVariadicField(T, field_name)) {
+                // After --, variadic consumes ALL remaining args (no option checking)
+                if (setVariadicField(T, result, field_name, current_idx, args.len)) |err| {
+                    return .{ .is_error = true, .err = err };
+                }
+                positional_index.* += 1;
+                return .{ .consumed_rest = true };
+            } else {
+                // Regular positional
+                if (setFieldByName(T, result, field_name, args[current_idx])) |err| {
+                    return .{ .is_error = true, .err = err };
+                }
+                positional_index.* += 1;
+                return .{};
+            }
+        }
+    }
+    return .{};
+}
+
+/// Set a variadic field's slice indices.
+fn setVariadicField(comptime T: type, result: *T, comptime field_name: []const u8, start: usize, end: usize) ?CliError {
+    const type_info = @typeInfo(T);
+    inline for (type_info.@"struct".fields) |field| {
+        if (std.mem.eql(u8, field.name, field_name)) {
+            if (field.type == CommandMod.VariadicSlice) {
+                @field(result, field.name) = .{ .start = start, .end = end };
+                return null;
+            } else {
+                return CliError.usageError("internal error: setVariadicField on non-variadic field").withContext(field_name);
+            }
+        }
+    }
+    return CliError.usageError("unknown field").withContext(field_name);
 }
 
 /// Get list of required fields (marked required or non-optional without default).
@@ -497,6 +693,77 @@ test "required field provided succeeds" {
     }
 }
 
+test "variadic positional parsing" {
+    const CopyCmd = struct {
+        dest: []const u8,
+        files: CommandMod.VariadicSlice = .{},
+        verbose: bool = false,
+
+        pub const positional = .{ .dest, .files };
+        pub const fields = .{
+            .verbose = .{ .short = 'v' },
+        };
+    };
+
+    const args = &[_][]const u8{ "output.txt", "file1.txt", "file2.txt", "file3.txt" };
+    const result = parse(CopyCmd, args);
+    switch (result) {
+        .ok => |cmd| {
+            try std.testing.expectEqualStrings("output.txt", cmd.dest);
+            const files = cmd.files.items(args);
+            try std.testing.expectEqual(@as(usize, 3), files.len);
+            try std.testing.expectEqualStrings("file1.txt", files[0]);
+            try std.testing.expectEqualStrings("file3.txt", files[2]);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "variadic with options interspersed" {
+    const RunCmd = struct {
+        files: CommandMod.VariadicSlice = .{},
+        verbose: bool = false,
+
+        pub const positional = .{.files};
+        pub const fields = .{
+            .verbose = .{ .short = 'v' },
+        };
+    };
+
+    // Files followed by option - variadic stops at option
+    const args = &[_][]const u8{ "a.txt", "b.txt", "-v" };
+    const result = parse(RunCmd, args);
+    switch (result) {
+        .ok => |cmd| {
+            const files = cmd.files.items(args);
+            try std.testing.expectEqual(@as(usize, 2), files.len);
+            try std.testing.expect(cmd.verbose);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "end-of-options marker with variadic" {
+    const RunCmd = struct {
+        files: CommandMod.VariadicSlice = .{},
+
+        pub const positional = .{.files};
+    };
+
+    // Everything after -- is a file, even if it looks like an option
+    const args = &[_][]const u8{ "--", "-weird-file.txt", "--another.txt" };
+    const result = parse(RunCmd, args);
+    switch (result) {
+        .ok => |cmd| {
+            const files = cmd.files.items(args);
+            try std.testing.expectEqual(@as(usize, 2), files.len);
+            try std.testing.expectEqualStrings("-weird-file.txt", files[0]);
+            try std.testing.expectEqualStrings("--another.txt", files[1]);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
 // =============================================================================
 // App-level parsing with subcommands
 // =============================================================================
@@ -510,6 +777,9 @@ pub fn AppParseResult(comptime App: type) type {
         ok: struct {
             global: GlobalOptions,
             command: CommandUnion,
+            /// The args slice passed to the command parser.
+            /// Use this for VariadicSlice.items() to get correct indices.
+            cmd_args: []const []const u8,
         },
         err: CliError,
         help,
@@ -517,6 +787,84 @@ pub fn AppParseResult(comptime App: type) type {
         /// Help requested for a specific command
         command_help: []const u8,
     };
+}
+
+/// Helper to dispatch to a named command by name.
+/// Used for default command dispatch and to reduce code duplication.
+fn dispatchToCommand(
+    comptime App: type,
+    comptime CommandUnion: type,
+    comptime union_info: std.builtin.Type,
+    comptime cmd_name: []const u8,
+    cmd_args: []const []const u8,
+    global: anytype,
+    comptime required_globals: []const []const u8,
+    globals_set: *[required_globals.len]bool,
+) AppParseResult(App) {
+    inline for (union_info.@"union".fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, cmd_name)) {
+            // Check if this is a subcommand group
+            if (@hasDecl(field.type, "is_subcommand_group") and field.type.is_subcommand_group) {
+                const sub_result = parseSubcommandGroup(field.type.commands, field.name, cmd_args);
+                switch (sub_result) {
+                    .ok => |sub| {
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        var wrapper: field.type = undefined;
+                        wrapper.value = sub.command;
+                        return .{ .ok = .{
+                            .global = global,
+                            .command = @unionInit(CommandUnion, field.name, wrapper),
+                            .cmd_args = sub.cmd_args,
+                        } };
+                    },
+                    .err => |err| {
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        return .{ .err = err };
+                    },
+                    .help => return .{ .command_help = field.name },
+                    .command_help => |sub_cmd| return .{ .command_help = sub_cmd },
+                    .version => return .version,
+                }
+            } else {
+                // Regular command
+                const cmd_result = parse(field.type, cmd_args);
+                switch (cmd_result) {
+                    .ok => |cmd| {
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        return .{ .ok = .{
+                            .global = global,
+                            .command = @unionInit(CommandUnion, field.name, cmd),
+                            .cmd_args = cmd_args,
+                        } };
+                    },
+                    .err => |err| {
+                        inline for (required_globals, 0..) |req_field, idx| {
+                            if (!globals_set[idx]) {
+                                return .{ .err = CliError.usageError("missing required global option").withContext(toCliOption(req_field)) };
+                            }
+                        }
+                        return .{ .err = err };
+                    },
+                    .help => return .{ .command_help = field.name },
+                    .version => return .version,
+                }
+            }
+        }
+    }
+    // Command not found in union - this is a compile-time error if default_command is invalid
+    @compileError("default_command '" ++ cmd_name ++ "' not found in Command union");
 }
 
 /// Parse app arguments with global options and subcommands.
@@ -685,23 +1033,29 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
     }
 
     // Phase 2: Identify and dispatch to command
-    if (i >= args.len) {
-        // No command provided - check if help/version was requested elsewhere
-        // or return missing command error
-        return .{ .err = CliError.usageError("missing command") };
-    }
-
-    const cmd_name = args[i];
-    const cmd_args = args[i + 1 ..];
-
-    // Match command name against union fields
     const union_info = @typeInfo(CommandUnion);
     if (union_info != .@"union") {
         @compileError("App.Command must be a union type (use Commands())");
     }
 
+    // Check if we have a default command
+    const has_default = @hasDecl(App, "default_command");
+
+    if (i >= args.len) {
+        // No command provided
+        if (has_default) {
+            // Dispatch to default command with empty args
+            return dispatchToCommand(App, CommandUnion, union_info, App.default_command, &.{}, global, required_globals, &globals_set);
+        }
+        return .{ .err = CliError.usageError("missing command") };
+    }
+
+    const first_arg = args[i];
+    const cmd_args = args[i + 1 ..];
+
+    // Try to match against explicit command names first (subcommand takes precedence)
     inline for (union_info.@"union".fields) |field| {
-        if (std.mem.eql(u8, field.name, cmd_name)) {
+        if (std.mem.eql(u8, field.name, first_arg)) {
             // Check if this is a subcommand group (has is_subcommand_group marker)
             if (@hasDecl(field.type, "is_subcommand_group") and field.type.is_subcommand_group) {
                 // For subcommand groups, parse first to discover nested help requests
@@ -716,10 +1070,11 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                         }
                         // Wrap in the Subcommand struct
                         var wrapper: field.type = undefined;
-                        wrapper.value = sub;
+                        wrapper.value = sub.command;
                         return .{ .ok = .{
                             .global = global,
                             .command = @unionInit(CommandUnion, field.name, wrapper),
+                            .cmd_args = sub.cmd_args,
                         } };
                     },
                     .err => |err| {
@@ -750,6 +1105,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                         return .{ .ok = .{
                             .global = global,
                             .command = @unionInit(CommandUnion, field.name, cmd),
+                            .cmd_args = cmd_args,
                         } };
                     },
                     .err => |err| {
@@ -771,7 +1127,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
         if (!@hasDecl(field.type, "is_subcommand_group")) {
             const cmd_meta = CommandMod.getCommandMeta(field.type);
             for (cmd_meta.aliases) |alias| {
-                if (std.mem.eql(u8, alias, cmd_name)) {
+                if (std.mem.eql(u8, alias, first_arg)) {
                     // Parse first to discover help/version
                     const cmd_result = parse(field.type, cmd_args);
                     switch (cmd_result) {
@@ -785,6 +1141,7 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
                             return .{ .ok = .{
                                 .global = global,
                                 .command = @unionInit(CommandUnion, field.name, cmd),
+                                .cmd_args = cmd_args,
                             } };
                         },
                         .err => |err| {
@@ -804,13 +1161,23 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
         }
     }
 
-    return .{ .err = CliError.usageError("unknown command").withContext(cmd_name) };
+    // No command matched - check for default command
+    if (has_default) {
+        // Dispatch to default command with ALL remaining args (including first_arg)
+        return dispatchToCommand(App, CommandUnion, union_info, App.default_command, args[i..], global, required_globals, &globals_set);
+    }
+
+    return .{ .err = CliError.usageError("unknown command").withContext(first_arg) };
 }
 
 /// Result of parsing a subcommand group.
 fn SubcommandGroupResult(comptime SubCommands: type) type {
     return union(enum) {
-        ok: SubCommands,
+        ok: struct {
+            command: SubCommands,
+            /// Args slice passed to parse() - use for VariadicSlice.items()
+            cmd_args: []const []const u8,
+        },
         err: CliError,
         help,
         version,
@@ -859,7 +1226,10 @@ fn parseSubcommandGroup(
             const cmd_result = parse(field.type, sub_cmd_args);
             switch (cmd_result) {
                 .ok => |cmd| {
-                    return .{ .ok = @unionInit(SubCommands, field.name, cmd) };
+                    return .{ .ok = .{
+                        .command = @unionInit(SubCommands, field.name, cmd),
+                        .cmd_args = sub_cmd_args,
+                    } };
                 },
                 .err => |err| return .{ .err = err },
                 .help => return .{ .command_help = field.name },
@@ -879,7 +1249,10 @@ fn parseSubcommandGroup(
                 const cmd_result = parse(field.type, sub_cmd_args);
                 switch (cmd_result) {
                     .ok => |cmd| {
-                        return .{ .ok = @unionInit(SubCommands, field.name, cmd) };
+                        return .{ .ok = .{
+                            .command = @unionInit(SubCommands, field.name, cmd),
+                            .cmd_args = sub_cmd_args,
+                        } };
                     },
                     .err => |err| return .{ .err = err },
                     .help => return .{ .command_help = field.name },
@@ -1059,6 +1432,125 @@ test "parseApp missing command" {
     switch (result) {
         .err => |err| {
             try std.testing.expectEqualStrings("missing command", err.message);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp default command - no args" {
+    const RunCmd = struct {
+        files: CommandMod.VariadicSlice = .{},
+    };
+    const ConfigCmd = struct {};
+
+    const TestApp = struct {
+        pub const meta = .{ .name = "myapp" };
+        pub const GlobalOptions = struct {
+            verbose: bool = false,
+        };
+        pub const default_command = "run";
+        pub const Command = CommandMod.Commands(.{
+            .run = RunCmd,
+            .config = ConfigCmd,
+        });
+    };
+
+    // No args -> default command with empty args
+    const result = parseApp(TestApp, &.{});
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .run);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp default command - with positional args" {
+    const RunCmd = struct {
+        files: CommandMod.VariadicSlice = .{},
+        pub const positional = .{.files};
+    };
+    const ConfigCmd = struct {};
+
+    const TestApp = struct {
+        pub const meta = .{ .name = "myapp" };
+        pub const GlobalOptions = struct {};
+        pub const default_command = "run";
+        pub const Command = CommandMod.Commands(.{
+            .run = RunCmd,
+            .config = ConfigCmd,
+        });
+    };
+
+    // Args that don't match a command -> default command
+    const args = &[_][]const u8{ "file1.txt", "file2.txt" };
+    const result = parseApp(TestApp, args);
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .run);
+            // Use cmd_args for correct VariadicSlice indexing
+            const files = r.command.run.files.items(r.cmd_args);
+            try std.testing.expectEqual(@as(usize, 2), files.len);
+            try std.testing.expectEqualStrings("file1.txt", files[0]);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp default command with global options - variadic indexing" {
+    const RunCmd = struct {
+        files: CommandMod.VariadicSlice = .{},
+        pub const positional = .{.files};
+    };
+    const ConfigCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {
+            verbose: bool = false,
+            pub const fields = .{ .verbose = .{ .short = 'v' } };
+        };
+        pub const default_command = "run";
+        pub const Command = CommandMod.Commands(.{
+            .run = RunCmd,
+            .config = ConfigCmd,
+        });
+    };
+
+    // Global option before positional args - tests that cmd_args is correct
+    const args = &[_][]const u8{ "-v", "file1.txt", "file2.txt" };
+    const result = parseApp(TestApp, args);
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.global.verbose);
+            try std.testing.expect(r.command == .run);
+            // Must use cmd_args, not original args
+            const files = r.command.run.files.items(r.cmd_args);
+            try std.testing.expectEqual(@as(usize, 2), files.len);
+            try std.testing.expectEqualStrings("file1.txt", files[0]);
+            try std.testing.expectEqualStrings("file2.txt", files[1]);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp default command - explicit subcommand takes precedence" {
+    const RunCmd = struct {};
+    const ConfigCmd = struct {};
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const default_command = "run";
+        pub const Command = CommandMod.Commands(.{
+            .run = RunCmd,
+            .config = ConfigCmd,
+        });
+    };
+
+    // Explicit 'config' command -> config, not default
+    const result = parseApp(TestApp, &.{"config"});
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .config);
         },
         else => try std.testing.expect(false),
     }
@@ -1650,6 +2142,52 @@ test "parseApp error messages show hyphens not underscores" {
             try std.testing.expectEqualStrings("missing required global option", err.message);
             // Context should show "--api-key" not "--api_key"
             try std.testing.expectEqualStrings("--api-key", err.context.?);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parseApp subcommand group with variadic positionals" {
+    const BibAddCmd = struct {
+        output: []const u8 = "",
+        files: CommandMod.VariadicSlice = .{},
+
+        pub const positional = .{ .output, .files };
+        pub const fields = .{
+            .files = .{ .variadic = true },
+        };
+        pub const meta = .{ .name = "add", .description = "Add bibliography entries" };
+    };
+
+    const TestApp = struct {
+        pub const GlobalOptions = struct {};
+        pub const Command = CommandMod.Commands(.{
+            .bib = CommandMod.Subcommand(.{
+                .add = BibAddCmd,
+            }),
+        });
+    };
+
+    // Test: "app bib add out.bib file1.bib file2.bib file3.bib"
+    // The cmd_args should be relative to the args passed to parse()
+    // which is args[1..] inside parseSubcommandGroup (i.e., ["add", "out.bib", ...])
+    // But the inner parse() gets sub_cmd_args which is args[1..] again
+    // So cmd_args should be ["out.bib", "file1.bib", "file2.bib", "file3.bib"]
+    const args = &[_][]const u8{ "bib", "add", "out.bib", "file1.bib", "file2.bib", "file3.bib" };
+    const result = parseApp(TestApp, args);
+    switch (result) {
+        .ok => |r| {
+            try std.testing.expect(r.command == .bib);
+            try std.testing.expect(r.command.bib.value == .add);
+            const add_cmd = r.command.bib.value.add;
+            try std.testing.expectEqualStrings("out.bib", add_cmd.output);
+
+            // The critical test: VariadicSlice.items() should work with cmd_args
+            const files = add_cmd.files.items(r.cmd_args);
+            try std.testing.expectEqual(@as(usize, 3), files.len);
+            try std.testing.expectEqualStrings("file1.bib", files[0]);
+            try std.testing.expectEqualStrings("file2.bib", files[1]);
+            try std.testing.expectEqualStrings("file3.bib", files[2]);
         },
         else => try std.testing.expect(false),
     }
