@@ -200,7 +200,9 @@ pub const Output = struct {
     fn writeHuman(self: *Self, value: anytype) !void {
         const T = @TypeOf(value);
         const type_info = @typeInfo(T);
-        const writer = self.file.deprecatedWriter();
+        // Empty buffer = unbuffered writes directly to file
+        var file_writer = self.file.writer(&.{});
+        const writer = &file_writer.interface;
 
         if (type_info == .@"struct") {
             // Simple key: value format
@@ -232,20 +234,21 @@ pub const Output = struct {
     /// Print a success message (suppressed in JSON/quiet mode).
     pub fn success(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        const writer = self.file.deprecatedWriter();
-        writer.print(fmt ++ "\n", args) catch return error.FormatError;
+        var file_writer = self.file.writer(&.{});
+        file_writer.interface.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an info message (suppressed in JSON/quiet mode).
     pub fn info(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        const writer = self.file.deprecatedWriter();
-        writer.print(fmt ++ "\n", args) catch return error.FormatError;
+        var file_writer = self.file.writer(&.{});
+        file_writer.interface.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an error.
     pub fn err(self: *Self, error_val: CliError) !void {
-        const stderr = std.fs.File.stderr().deprecatedWriter();
+        var stderr_writer = std.fs.File.stderr().writer(&.{});
+        const stderr = &stderr_writer.interface;
         var escape_buf: [1024]u8 = undefined;
 
         switch (self.mode) {
@@ -287,7 +290,8 @@ pub const Output = struct {
 
     /// Raw print for custom formatting.
     pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        self.file.deprecatedWriter().print(fmt, args) catch return error.FormatError;
+        var file_writer = self.file.writer(&.{});
+        file_writer.interface.print(fmt, args) catch return error.FormatError;
     }
 };
 
