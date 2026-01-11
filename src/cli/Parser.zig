@@ -159,7 +159,8 @@ pub fn parseWithEnv(comptime T: type, args: []const []const u8, env: anytype) Pa
 
         // Combined short options (e.g., -abc) or short option with inline value (e.g., -uhttp://x)
         // are not supported - give a clear error
-        if (arg.len > 2 and arg[0] == '-' and arg[1] != '-') {
+        // Exception: negative numbers like -100 should be treated as positional arguments
+        if (arg.len > 2 and arg[0] == '-' and arg[1] != '-' and !std.ascii.isDigit(arg[1])) {
             return .{ .err = CliError.usageError("combined short options (-abc) and inline values (-uVALUE) not supported; use -a -b -c or -u VALUE").withContext(arg) };
         }
 
@@ -646,7 +647,8 @@ pub fn parseApp(comptime App: type, args: []const []const u8) AppParseResult(App
 
         // Combined short options (e.g., -abc) or short option with inline value (e.g., -uhttp://x)
         // are not supported - give a clear error
-        if (arg.len > 2 and arg[0] == '-' and arg[1] != '-') {
+        // Exception: negative numbers like -100 should fall through as command names
+        if (arg.len > 2 and arg[0] == '-' and arg[1] != '-' and !std.ascii.isDigit(arg[1])) {
             return .{ .err = CliError.usageError("combined short options (-abc) and inline values (-uVALUE) not supported; use -a -b -c or -u VALUE").withContext(arg) };
         }
 
@@ -1059,6 +1061,22 @@ test "parse combined short options error" {
     switch (result) {
         .err => |err| {
             try std.testing.expect(std.mem.indexOf(u8, err.message, "combined short options") != null);
+        },
+        else => try std.testing.expect(false),
+    }
+}
+
+test "parse negative number as positional" {
+    const TestCmd = struct {
+        value: i32 = 0,
+        pub const positional = .{.value};
+    };
+
+    // Negative numbers should be treated as positional arguments, not combined short options
+    const result = parse(TestCmd, &.{"-100"});
+    switch (result) {
+        .ok => |cmd| {
+            try std.testing.expectEqual(@as(i32, -100), cmd.value);
         },
         else => try std.testing.expect(false),
     }
