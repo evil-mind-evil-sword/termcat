@@ -247,9 +247,10 @@ fn enterRawMode(self: *InputReader, enable_signals: bool) !void {
 
     if (self.blocking) {
         // Blocking mode: VMIN=1 makes read() block until at least 1 byte available
-        // VTIME=1 (100ms) allows escape sequence disambiguation
+        // VTIME=0 returns immediately when VMIN is satisfied (no inter-byte delay)
+        // Escape sequence disambiguation is handled by the decoder's timeout logic
         raw.cc[@intFromEnum(posix.V.MIN)] = 1;
-        raw.cc[@intFromEnum(posix.V.TIME)] = 1; // 100ms timeout for escape sequences
+        raw.cc[@intFromEnum(posix.V.TIME)] = 0; // No timeout - return immediately on input
     } else {
         // Non-blocking mode: use poll/select to wait for data
         raw.cc[@intFromEnum(posix.V.MIN)] = 0;
