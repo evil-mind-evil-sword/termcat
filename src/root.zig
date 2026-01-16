@@ -35,6 +35,8 @@ pub const PixelBlitter = @import("PixelBlitter.zig");
 pub const graphics = struct {
     pub const Kitty = @import("graphics/kitty.zig").KittyGraphics;
     pub const KittyGraphics = Kitty;
+    pub const ITerm2 = @import("graphics/iterm2.zig").ITerm2Graphics;
+    pub const ITerm2Graphics = ITerm2;
 };
 
 // Unicode utilities
