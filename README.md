@@ -6,26 +6,32 @@
 
 **Fast and portable terminal I/O.**
 
-termcat is inspired by libraries like [termbox2](https://github.com/termbox/termbox2) and [notcurses](https://github.com/dankamongmen/notcurses). It provides features for real applications—mouse input, graphics protocols, a full widget library—while staying small and portable.
+termcat is inspired by libraries like
+[termbox2](https://github.com/termbox/termbox2) and
+[notcurses](https://github.com/dankamongmen/notcurses). It provides features for
+real applications—mouse input, graphics protocols, a full widget library—while
+staying small and portable.
 
 ## Features
 
-| Category | Capabilities |
-|----------|-------------|
+| Category      | Capabilities                                                                                   |
+| ------------- | ---------------------------------------------------------------------------------------------- |
 | **Rendering** | Double-buffered diff rendering, composable planes with z-order, synchronized output (DEC 2026) |
-| **Color** | True color, 256-color, 16-color with automatic downgrade based on terminal capabilities |
-| **Graphics** | Kitty graphics protocol, pixel blitting (ASCII, half-block, quadrant, braille) |
-| **Input** | Keyboard with modifiers, mouse tracking, bracketed paste, focus events |
-| **Unicode** | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences |
-| **TUI** | 35+ widgets, constraint-based layout, MVU application framework, theming |
-| **CLI** | Comptime command definitions, mode-aware output (JSON/human/quiet), progress indicators |
-| **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+ |
+| **Color**     | True color, 256-color, 16-color with automatic downgrade based on terminal capabilities        |
+| **Graphics**  | Kitty graphics protocol, pixel blitting (ASCII, half-block, quadrant, braille)                 |
+| **Input**     | Keyboard with modifiers, mouse tracking, bracketed paste, focus events                         |
+| **Unicode**   | Wide characters (CJK, emoji), 8 combining marks per cell, ZWJ sequences                        |
+| **TUI**       | 35+ widgets, constraint-based layout, MVU application framework, theming                       |
+| **CLI**       | Comptime command definitions, mode-aware output (JSON/human/quiet), progress indicators        |
+| **Platforms** | POSIX (Linux, macOS, BSD), Windows 10+                                                         |
 
-**Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI applications.
+**Binary size**: 54KB (ReleaseSmall) for core library, 120-140KB for full TUI
+applications.
 
 ## Install
 
 Add to your `build.zig.zon`:
+
 ```zig
 .termcat = .{
     .url = "https://github.com/evil-mind-evil-sword/termcat/archive/refs/heads/main.tar.gz",
@@ -65,7 +71,8 @@ pub fn main() !void {
 
 ## Architecture
 
-termcat is organized in layers. Use whichever level of abstraction fits your needs.
+termcat is organized in layers. Use whichever level of abstraction fits your
+needs.
 
 ```
 ┌───────────────────────────────┬─────────────────────────┐
@@ -173,7 +180,8 @@ switch (event) {
 
 termcat supports two graphics modes for displaying images in the terminal.
 
-**Kitty Graphics Protocol** transmits pixel data directly to supported terminals (Kitty, Ghostty, WezTerm):
+**Kitty Graphics Protocol** transmits pixel data directly to supported terminals
+(Kitty, Ghostty, WezTerm):
 
 ```zig
 var kitty = termcat.graphics.KittyGraphics.init(allocator);
@@ -187,7 +195,8 @@ try kitty.draw(backend.writer(), surface, .{
 });
 ```
 
-**Pixel Blitter** renders images using Unicode characters, working in any terminal:
+**Pixel Blitter** renders images using Unicode characters, working in any
+terminal:
 
 ```zig
 // Modes: .ascii (1x1), .half_block (1x2), .quadrant (2x2), .braille (2x4 pixels per cell)
@@ -203,14 +212,14 @@ termcat includes a widget library for building terminal applications.
 
 ### Widgets
 
-| Category | Widgets |
-|----------|---------|
-| **Basic** | Label, Button, Link, Rule |
-| **Input** | InputField, TextArea, Checkbox, RadioButton, Switch, Select, Autocomplete |
-| **Layout** | Flex (Row/Column), Padding, Border, ScrollView, Collapsible |
-| **Display** | ProgressBar, Spinner, Loading, Sparkline, DataTable, Tree |
-| **Navigation** | Tabs, Modal, ScreenStack, CommandPalette |
-| **Rich Text** | Markdown, Diff, Toast, Log |
+| Category       | Widgets                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| **Basic**      | Label, Button, Link, Rule                                                 |
+| **Input**      | InputField, TextArea, Checkbox, RadioButton, Switch, Select, Autocomplete |
+| **Layout**     | Flex (Row/Column), Padding, Border, ScrollView, Collapsible               |
+| **Display**    | ProgressBar, Spinner, Loading, Sparkline, DataTable, Tree                 |
+| **Navigation** | Tabs, Modal, ScreenStack, CommandPalette                                  |
+| **Rich Text**  | Markdown, Diff, Toast, Log                                                |
 
 ### Layout System
 
@@ -225,7 +234,8 @@ flex.addChild(footer,  Constraint.fromFixed(1));    // exactly 1 row
 
 ### MVU Application Framework
 
-For complex applications, termcat provides an Elm-style Model-View-Update runtime:
+For complex applications, termcat provides an Elm-style Model-View-Update
+runtime:
 
 ```zig
 const MyApp = termcat.tui.App(Model, Msg);
@@ -258,7 +268,8 @@ const theme = termcat.tui.Theme{
 
 ## CLI Module
 
-termcat.cli provides infrastructure for building command-line tools without TUI requirements.
+termcat.cli provides infrastructure for building command-line tools without TUI
+requirements.
 
 ### Command Definition
 
@@ -420,18 +431,22 @@ Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
 
 ## Comparison
 
-| Feature | termcat | termbox2 | notcurses |
-|---------|---------|----------|-----------|
-| Widgets | 35+ | None | Minimal |
-| Graphics | Kitty, blitting | None | Sixel, Kitty, video |
-| Threading | Single | Single | Multi |
-| Dependencies | None | None | ffmpeg (optional) |
+| Feature      | termcat         | termbox2 | notcurses           |
+| ------------ | --------------- | -------- | ------------------- |
+| Widgets      | 35+             | None     | Minimal             |
+| Graphics     | Kitty, blitting | None     | Sixel, Kitty, video |
+| Threading    | Single          | Single   | Multi               |
+| Dependencies | None            | None     | ffmpeg (optional)   |
 
 ## Related
 
-**Classic**: [ncurses](https://invisible-island.net/ncurses/) (Thomas E. Dickey, 1996+), [termbox2](https://github.com/termbox/termbox2)
+**Classic**: [ncurses](https://invisible-island.net/ncurses/) (Thomas E. Dickey,
+1996+), [termbox2](https://github.com/termbox/termbox2)
 
-**Modern**: [notcurses](https://github.com/dankamongmen/notcurses), [crossterm](https://github.com/crossterm-rs/crossterm) (Rust), [tcell](https://github.com/gdamore/tcell) (Go), [ratatui](https://ratatui.rs/) (Rust)
+**Modern**: [notcurses](https://github.com/dankamongmen/notcurses),
+[crossterm](https://github.com/crossterm-rs/crossterm) (Rust),
+[tcell](https://github.com/gdamore/tcell) (Go), [ratatui](https://ratatui.rs/)
+(Rust)
 
 ## License
 

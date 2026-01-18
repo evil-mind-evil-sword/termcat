@@ -2,7 +2,9 @@
 
 ## Context
 
-The pluckz project encountered three limitations when integrating with termcat.cli that required manual workarounds. This document analyzes these limitations and proposes extensions.
+The pluckz project encountered three limitations when integrating with
+termcat.cli that required manual workarounds. This document analyzes these
+limitations and proposes extensions.
 
 **Source**: pluckz/src/cli/cli.zig partial integration pattern
 
@@ -10,16 +12,19 @@ The pluckz project encountered three limitations when integrating with termcat.c
 
 ### Problem
 
-`parseApp()` requires an explicit command name. Apps with a "default mode" (no subcommand = run main functionality) must handle this manually.
+`parseApp()` requires an explicit command name. Apps with a "default mode" (no
+subcommand = run main functionality) must handle this manually.
 
 **Current behavior** (Parser.zig:688-691):
+
 ```zig
 if (i >= args.len) {
     return .{ .err = CliError.usageError("missing command") };
 }
 ```
 
-**Workaround**: pluckz checks for `auth` subcommand first, then falls back to `Parser.parse()` for GlobalOptions only.
+**Workaround**: pluckz checks for `auth` subcommand first, then falls back to
+`Parser.parse()` for GlobalOptions only.
 
 ### Proposed Solution
 
@@ -41,6 +46,7 @@ pub const MyApp = struct {
 ```
 
 **Implementation** in parseApp():
+
 ```zig
 if (i >= args.len) {
     // Check for default_command declaration
@@ -56,7 +62,8 @@ if (i >= args.len) {
 
 ### Alternative: Implicit Default
 
-If no command is provided AND `GlobalOptions` has positional fields, parse those directly:
+If no command is provided AND `GlobalOptions` has positional fields, parse those
+directly:
 
 ```zig
 pub const GlobalOptions = struct {
@@ -75,16 +82,19 @@ This is more complex but matches pluckz's actual need.
 
 ### Problem
 
-Commands can only declare fixed positional arguments. Variable-length positionals like `[files...]` require pre-filtering args before parsing.
+Commands can only declare fixed positional arguments. Variable-length
+positionals like `[files...]` require pre-filtering args before parsing.
 
 **Current behavior** (Parser.zig:203-204):
+
 ```zig
 } else {
     return .{ .err = CliError.usageError("unexpected argument").withContext(arg) };
 }
 ```
 
-**Workaround**: pluckz pre-filters file arguments into a separate ArrayList before calling `Parser.parse()`.
+**Workaround**: pluckz pre-filters file arguments into a separate ArrayList
+before calling `Parser.parse()`.
 
 ### Proposed Solution A: Variadic Marker Type
 
@@ -105,6 +115,7 @@ pub const Command = struct {
 ```
 
 **Variadic type definition**:
+
 ```zig
 pub fn Variadic(comptime T: type) type {
     return struct {
@@ -117,6 +128,7 @@ pub fn Variadic(comptime T: type) type {
 ```
 
 **Parser changes**:
+
 ```zig
 // In parse(), when processing positionals:
 if (positional_index < positional_fields.len) {
@@ -139,7 +151,8 @@ if (positional_index < positional_fields.len) {
 
 ### Proposed Solution B: Trailing Slice Convention
 
-Simpler approach: if the last positional is `[][]const u8`, treat it as variadic:
+Simpler approach: if the last positional is `[][]const u8`, treat it as
+variadic:
 
 ```zig
 pub const Command = struct {
@@ -150,17 +163,18 @@ pub const Command = struct {
 };
 ```
 
-**Pros**: No new types needed
-**Cons**: Less explicit, requires allocation
+**Pros**: No new types needed **Cons**: Less explicit, requires allocation
 
 ### Allocation Consideration
 
 Both solutions require runtime allocation for the slice. Options:
+
 1. Require allocator parameter to `parse()`
 2. Use bounded array: `files: std.BoundedArray([]const u8, 256)`
 3. Return indices into original args slice (zero-copy but less ergonomic)
 
-**Recommendation**: Add optional allocator parameter with bounded array fallback:
+**Recommendation**: Add optional allocator parameter with bounded array
+fallback:
 
 ```zig
 pub fn parse(comptime T: type, args: []const []const u8) ParseResult(T) { ... }
@@ -173,9 +187,11 @@ pub fn parseAlloc(comptime T: type, args: []const []const u8, allocator: Allocat
 
 ### Problem
 
-Auto-generated help via `Help.zig` is designed for parseApp() integration. Commands that use `parse()` directly lose help generation.
+Auto-generated help via `Help.zig` is designed for parseApp() integration.
+Commands that use `parse()` directly lose help generation.
 
-**Workaround**: pluckz has manual `printHelp()` function duplicating termcat.cli knowledge.
+**Workaround**: pluckz has manual `printHelp()` function duplicating termcat.cli
+knowledge.
 
 ### Proposed Solution
 
@@ -233,13 +249,14 @@ pub fn generateAppHelpManual(
 
 ## Implementation Priority
 
-| Extension | Complexity | Impact | Priority |
-|-----------|------------|--------|----------|
-| Default command | Low | Medium | P2 |
-| Variadic positionals | Medium | High | P1 |
-| Standalone help utilities | Low | Medium | P2 |
+| Extension                 | Complexity | Impact | Priority |
+| ------------------------- | ---------- | ------ | -------- |
+| Default command           | Low        | Medium | P2       |
+| Variadic positionals      | Medium     | High   | P1       |
+| Standalone help utilities | Low        | Medium | P2       |
 
-**Recommendation**: Start with variadic positionals (P1) as it addresses the most common CLI pattern (multiple input files).
+**Recommendation**: Start with variadic positionals (P1) as it addresses the
+most common CLI pattern (multiple input files).
 
 ---
 
@@ -247,13 +264,16 @@ pub fn generateAppHelpManual(
 
 ### 1. External Args Pre-processing
 
-Keep termcat.cli minimal, expect callers to pre-filter args. This is what pluckz does today.
+Keep termcat.cli minimal, expect callers to pre-filter args. This is what pluckz
+does today.
 
-**Rejected**: Too much boilerplate, easy to get wrong (short option value consumption, `--` handling).
+**Rejected**: Too much boilerplate, easy to get wrong (short option value
+consumption, `--` handling).
 
 ### 2. REST-style Subcommands Only
 
-Require all CLIs to use explicit subcommands (e.g., `git add`, not `git` with implied add).
+Require all CLIs to use explicit subcommands (e.g., `git add`, not `git` with
+implied add).
 
 **Rejected**: Doesn't match common CLI conventions (compilers, interpreters).
 
@@ -269,20 +289,23 @@ Replace declarative parsing with callbacks that handle remaining args.
 
 ### Subcommand vs Positional Conflict
 
-When default command is enabled and a positional argument matches a subcommand name:
+When default command is enabled and a positional argument matches a subcommand
+name:
 
 ```
 myapp auth          # Is this subcommand 'auth' or file named 'auth'?
 ```
 
-**Resolution**: Subcommands take precedence. To pass a file named like a subcommand:
+**Resolution**: Subcommands take precedence. To pass a file named like a
+subcommand:
 
 ```
 myapp -- auth       # Explicit: treat 'auth' as positional
 myapp ./auth        # Path prefix disambiguates
 ```
 
-**Implementation**: Check subcommand match BEFORE falling back to default command:
+**Implementation**: Check subcommand match BEFORE falling back to default
+command:
 
 ```zig
 // In parseApp():
@@ -316,7 +339,8 @@ The `--` separator signals "all following args are positional, not options":
 myapp --verbose -- --file-starting-with-dash.txt -another-file.txt
 ```
 
-**Current state**: `parseApp()` handles `--` (Parser.zig:596-599), but base `parse()` does not.
+**Current state**: `parseApp()` handles `--` (Parser.zig:596-599), but base
+`parse()` does not.
 
 **Required change**: Add `--` handling to `parse()` for variadic positionals:
 
@@ -337,7 +361,8 @@ if (std.mem.eql(u8, arg, "--")) {
 
 ## Zero-Allocation Variadic Approach
 
-Instead of allocating a new slice, return indices into the original `args` array:
+Instead of allocating a new slice, return indices into the original `args`
+array:
 
 ```zig
 pub const VariadicSlice = struct {
@@ -358,6 +383,7 @@ pub const Command = struct {
 ```
 
 **Usage**:
+
 ```zig
 const result = parse(Command, args);
 const files = result.files.items(args);  // Caller provides original args
@@ -365,13 +391,14 @@ const files = result.files.items(args);  // Caller provides original args
 
 **Tradeoffs**:
 
-| Approach | Allocation | Ergonomics | Lifetime |
-|----------|------------|------------|----------|
-| `[][]const u8` | Yes | Natural slice | Owned |
-| `VariadicSlice` | No | Extra call | Tied to args |
-| `BoundedArray` | No (stack) | Limited size | Owned |
+| Approach        | Allocation | Ergonomics    | Lifetime     |
+| --------------- | ---------- | ------------- | ------------ |
+| `[][]const u8`  | Yes        | Natural slice | Owned        |
+| `VariadicSlice` | No         | Extra call    | Tied to args |
+| `BoundedArray`  | No (stack) | Limited size  | Owned        |
 
-**Recommendation**: Offer both. Default to `VariadicSlice` for zero-copy, add `parseAlloc()` for owned slice.
+**Recommendation**: Offer both. Default to `VariadicSlice` for zero-copy, add
+`parseAlloc()` for owned slice.
 
 ---
 
@@ -430,7 +457,9 @@ if (isVariadicField(T, field.name)) {
 
 ### VariadicSlice Index Semantics
 
-`VariadicSlice` stores indices relative to the args slice passed to `parse()`. When using `parseApp()`, the result includes a `cmd_args` field containing the correct slice:
+`VariadicSlice` stores indices relative to the args slice passed to `parse()`.
+When using `parseApp()`, the result includes a `cmd_args` field containing the
+correct slice:
 
 ```zig
 const result = parseApp(MyApp, args);
@@ -460,7 +489,8 @@ switch (result) {
 
 ### Subcommand Groups
 
-For subcommand groups (e.g., `app bib add file1.bib file2.bib`), the `cmd_args` slice is correctly propagated through the nested parsing:
+For subcommand groups (e.g., `app bib add file1.bib file2.bib`), the `cmd_args`
+slice is correctly propagated through the nested parsing:
 
 ```zig
 const result = parseApp(MyApp, &.{ "bib", "add", "out.bib", "file1.bib", "file2.bib" });
@@ -474,16 +504,22 @@ switch (result) {
 }
 ```
 
-The `parseSubcommandGroup()` function returns both the parsed command and the args slice used for parsing, ensuring `VariadicSlice` indices work correctly regardless of nesting depth.
+The `parseSubcommandGroup()` function returns both the parsed command and the
+args slice used for parsing, ensuring `VariadicSlice` indices work correctly
+regardless of nesting depth.
 
 ---
 
 ## Open Questions
 
-1. **Allocator threading**: Should parseAlloc return an arena that caller must free, or individual allocations?
+1. **Allocator threading**: Should parseAlloc return an arena that caller must
+   free, or individual allocations?
 
-2. **Help customization**: How much should generated help be customizable (section order, formatting)?
+2. **Help customization**: How much should generated help be customizable
+   (section order, formatting)?
 
-3. **Error context for variadics**: How to report errors in variadic args (which file failed to validate)?
+3. **Error context for variadics**: How to report errors in variadic args (which
+   file failed to validate)?
 
-4. **Minimum variadic count**: Should variadic support `files: Variadic([]const u8, .{.min = 1})` for "at least one required"?
+4. **Minimum variadic count**: Should variadic support
+   `files: Variadic([]const u8, .{.min = 1})` for "at least one required"?
