@@ -409,6 +409,116 @@ pub fn size(self: Buffer) Size {
     return Size{ .width = self.width, .height = self.height };
 }
 
+// ============================================================================
+// Content extraction (for testing/inspection)
+// ============================================================================
+
+/// Extract a single row as plain text.
+/// Wide characters are rendered once; continuation cells are skipped.
+/// Returns owned string; caller must free.
+pub fn getLineText(self: Buffer, allocator: std.mem.Allocator, row: u16) ![]u8 {
+    if (row >= self.height) return allocator.alloc(u8, 0);
+
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+
+    var x: u16 = 0;
+    while (x < self.width) : (x += 1) {
+        const cell = self.getCell(x, row);
+
+        // Skip continuation cells (second half of wide chars)
+        if (cell.isContinuation()) continue;
+
+        // Encode the main character
+        if (cell.char > 0) {
+            var buf: [4]u8 = undefined;
+            const len = std.unicode.utf8Encode(cell.char, &buf) catch 1;
+            try list.appendSlice(allocator, buf[0..len]);
+
+            // Encode combining marks
+            for (cell.combining) |mark| {
+                if (mark == 0) break;
+                var mark_buf: [4]u8 = undefined;
+                const mark_len = std.unicode.utf8Encode(mark, &mark_buf) catch continue;
+                try list.appendSlice(allocator, mark_buf[0..mark_len]);
+            }
+        }
+    }
+
+    return list.toOwnedSlice(allocator);
+}
+
+/// Extract the entire buffer as a multi-line string.
+/// Lines are separated by newlines. Trailing spaces on each line are preserved.
+/// Returns owned string; caller must free.
+pub fn toString(self: Buffer, allocator: std.mem.Allocator) ![]u8 {
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+
+    var y: u16 = 0;
+    while (y < self.height) : (y += 1) {
+        const line = try self.getLineText(allocator, y);
+        defer allocator.free(line);
+
+        try list.appendSlice(allocator, line);
+        if (y + 1 < self.height) {
+            try list.append(allocator, '\n');
+        }
+    }
+
+    return list.toOwnedSlice(allocator);
+}
+
+/// Extract a rectangular region as a multi-line string.
+/// Coordinates are clipped to buffer bounds.
+/// Returns owned string; caller must free.
+pub fn getRegionText(self: Buffer, allocator: std.mem.Allocator, rect: Rect) ![]u8 {
+    // Clip to buffer bounds
+    const x_start = rect.x;
+    const y_start = rect.y;
+    const x_end = @min(rect.x +| rect.width, self.width);
+    const y_end = @min(rect.y +| rect.height, self.height);
+
+    if (x_start >= self.width or y_start >= self.height or x_start >= x_end or y_start >= y_end) {
+        return allocator.alloc(u8, 0);
+    }
+
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+
+    var y = y_start;
+    while (y < y_end) : (y += 1) {
+        var x = x_start;
+        while (x < x_end) : (x += 1) {
+            const cell = self.getCell(x, y);
+
+            // Skip continuation cells
+            if (cell.isContinuation()) continue;
+
+            // Encode the main character
+            if (cell.char > 0) {
+                var buf: [4]u8 = undefined;
+                const len = std.unicode.utf8Encode(cell.char, &buf) catch 1;
+                try list.appendSlice(allocator, buf[0..len]);
+
+                // Encode combining marks
+                for (cell.combining) |mark| {
+                    if (mark == 0) break;
+                    var mark_buf: [4]u8 = undefined;
+                    const mark_len = std.unicode.utf8Encode(mark, &mark_buf) catch continue;
+                    try list.appendSlice(allocator, mark_buf[0..mark_len]);
+                }
+            }
+        }
+
+        if (y + 1 < y_end) {
+            try list.append(allocator, '\n');
+        }
+    }
+
+    return list.toOwnedSlice(allocator);
+}
+
 test "Buffer init and deinit" {
     var buf = try Buffer.init(std.testing.allocator, .{ .width = 80, .height = 24 });
     defer buf.deinit();
@@ -907,4 +1017,106 @@ test "Buffer setWideCell rejects x == maxInt(u16) to prevent wrap" {
 
     // Buffer should remain unchanged (all default cells)
     try std.testing.expect(buf.getCell(0, 0).eql(Cell.default));
+}
+
+// ============================================================================
+// Content extraction tests
+// ============================================================================
+
+test "Buffer getLineText simple ASCII" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 10, .height = 2 });
+    defer buf.deinit();
+
+    buf.print(0, 0, "Hello", .default, .default, .{});
+
+    const line = try buf.getLineText(std.testing.allocator, 0);
+    defer std.testing.allocator.free(line);
+
+    // "Hello" + 5 spaces (default cells)
+    try std.testing.expectEqualStrings("Hello     ", line);
+}
+
+test "Buffer getLineText with wide characters" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    // Print wide char (width 2) followed by ASCII
+    buf.print(0, 0, "中x", .default, .default, .{});
+
+    const line = try buf.getLineText(std.testing.allocator, 0);
+    defer std.testing.allocator.free(line);
+
+    // "中" (3 bytes) + "x" + 7 spaces
+    try std.testing.expectEqual(@as(usize, 11), line.len); // 3 + 1 + 7
+    try std.testing.expect(std.mem.startsWith(u8, line, "中x"));
+}
+
+test "Buffer getLineText with combining marks" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 10, .height = 1 });
+    defer buf.deinit();
+
+    // Print "e" + combining acute accent
+    buf.print(0, 0, "e\xCC\x81", .default, .default, .{});
+
+    const line = try buf.getLineText(std.testing.allocator, 0);
+    defer std.testing.allocator.free(line);
+
+    // Should include the combining mark
+    try std.testing.expect(std.mem.startsWith(u8, line, "e\xCC\x81"));
+}
+
+test "Buffer getLineText out of bounds returns empty" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 10, .height = 2 });
+    defer buf.deinit();
+
+    const line = try buf.getLineText(std.testing.allocator, 100);
+    defer std.testing.allocator.free(line);
+
+    try std.testing.expectEqual(@as(usize, 0), line.len);
+}
+
+test "Buffer toString multi-line" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 5, .height = 3 });
+    defer buf.deinit();
+
+    buf.print(0, 0, "ABC", .default, .default, .{});
+    buf.print(0, 1, "DEF", .default, .default, .{});
+    buf.print(0, 2, "GHI", .default, .default, .{});
+
+    const text = try buf.toString(std.testing.allocator);
+    defer std.testing.allocator.free(text);
+
+    // Each line is 5 chars (3 printed + 2 spaces), separated by newlines
+    try std.testing.expectEqualStrings("ABC  \nDEF  \nGHI  ", text);
+}
+
+test "Buffer getRegionText extracts rectangle" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 10, .height = 5 });
+    defer buf.deinit();
+
+    buf.print(0, 0, "0123456789", .default, .default, .{});
+    buf.print(0, 1, "ABCDEFGHIJ", .default, .default, .{});
+    buf.print(0, 2, "abcdefghij", .default, .default, .{});
+
+    // Extract middle 3x2 region starting at (2, 1)
+    const region = try buf.getRegionText(std.testing.allocator, .{ .x = 2, .y = 1, .width = 3, .height = 2 });
+    defer std.testing.allocator.free(region);
+
+    try std.testing.expectEqualStrings("CDE\ncde", region);
+}
+
+test "Buffer getRegionText clips to bounds" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 5, .height = 3 });
+    defer buf.deinit();
+
+    buf.print(0, 0, "ABCDE", .default, .default, .{});
+    buf.print(0, 1, "FGHIJ", .default, .default, .{});
+    buf.print(0, 2, "KLMNO", .default, .default, .{});
+
+    // Request region extending beyond buffer
+    const region = try buf.getRegionText(std.testing.allocator, .{ .x = 3, .y = 1, .width = 10, .height = 10 });
+    defer std.testing.allocator.free(region);
+
+    // Should clip to (3,1) to (5,3)
+    try std.testing.expectEqualStrings("IJ\nNO", region);
 }

@@ -607,6 +607,31 @@ pub fn size(self: *const Plane) Size {
     return .{ .width = self.width, .height = self.height };
 }
 
+// ============================================================================
+// Content extraction (for testing/inspection)
+// ============================================================================
+
+/// Extract a single row as plain text.
+/// Wide characters are rendered once; continuation cells are skipped.
+/// Returns owned string; caller must free.
+pub fn getLineText(self: *const Plane, row: u16) ![]u8 {
+    return self.buffer.getLineText(self.allocator, row);
+}
+
+/// Extract the entire plane as a multi-line string.
+/// Lines are separated by newlines. Trailing spaces on each line are preserved.
+/// Returns owned string; caller must free.
+pub fn toString(self: *const Plane) ![]u8 {
+    return self.buffer.toString(self.allocator);
+}
+
+/// Extract a rectangular region as a multi-line string.
+/// Coordinates are clipped to plane bounds.
+/// Returns owned string; caller must free.
+pub fn getRegionText(self: *const Plane, rect: Rect) ![]u8 {
+    return self.buffer.getRegionText(self.allocator, rect);
+}
+
 /// Iterate over all visible planes in z-order (back to front).
 /// Calls the callback for each visible plane, passing screen position.
 /// If callback returns false, iteration stops.
@@ -1395,4 +1420,54 @@ test "markAllDirty marks entire plane" {
     try std.testing.expectEqual(@as(u16, 0), dirty.y);
     try std.testing.expectEqual(@as(u16, 50), dirty.width);
     try std.testing.expectEqual(@as(u16, 30), dirty.height);
+}
+
+// ============================================================================
+// Content extraction tests
+// ============================================================================
+
+test "Plane getLineText" {
+    const allocator = std.testing.allocator;
+
+    const root = try Plane.initRoot(allocator, .{ .width = 10, .height = 2 });
+    defer root.deinit();
+
+    root.print(0, 0, "Hello", Color.white, Color.black, .{});
+
+    const line = try root.getLineText(0);
+    defer allocator.free(line);
+
+    // "Hello" + 5 spaces
+    try std.testing.expectEqualStrings("Hello     ", line);
+}
+
+test "Plane toString" {
+    const allocator = std.testing.allocator;
+
+    const root = try Plane.initRoot(allocator, .{ .width = 5, .height = 2 });
+    defer root.deinit();
+
+    root.print(0, 0, "ABC", Color.white, Color.black, .{});
+    root.print(0, 1, "XYZ", Color.white, Color.black, .{});
+
+    const text = try root.toString();
+    defer allocator.free(text);
+
+    try std.testing.expectEqualStrings("ABC  \nXYZ  ", text);
+}
+
+test "Plane getRegionText" {
+    const allocator = std.testing.allocator;
+
+    const root = try Plane.initRoot(allocator, .{ .width = 10, .height = 3 });
+    defer root.deinit();
+
+    root.print(0, 0, "0123456789", Color.white, Color.black, .{});
+    root.print(0, 1, "ABCDEFGHIJ", Color.white, Color.black, .{});
+    root.print(0, 2, "abcdefghij", Color.white, Color.black, .{});
+
+    const region = try root.getRegionText(.{ .x = 2, .y = 0, .width = 4, .height = 2 });
+    defer allocator.free(region);
+
+    try std.testing.expectEqualStrings("2345\nCDEF", region);
 }
