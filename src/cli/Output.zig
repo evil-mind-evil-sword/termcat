@@ -358,3 +358,38 @@ test "Output record formatting" {
     const quiet_output = read_buf[0..bytes_read2];
     try std.testing.expectEqualStrings("abc123\n", quiet_output);
 }
+
+test "Output large content via print" {
+    // Create a temporary file for testing
+    var tmp_dir = std.testing.tmpDir(.{});
+    defer tmp_dir.cleanup();
+    const tmp_file = try tmp_dir.dir.createFile("test_large", .{ .read = true });
+    defer tmp_file.close();
+
+    var output = Output.initWithFile(tmp_file, std.testing.allocator);
+
+    // Test with increasing sizes to find the limit
+    const sizes = [_]usize{ 1024, 4096, 8192, 16384, 32768, 65536 };
+    for (sizes) |size| {
+        // Reset file position
+        try tmp_file.seekTo(0);
+        try tmp_file.setEndPos(0);
+
+        const large_content = try std.testing.allocator.alloc(u8, size);
+        defer std.testing.allocator.free(large_content);
+        @memset(large_content, 'A');
+
+        // Try printing via output.print
+        output.print("{s}\n", .{large_content}) catch |err| {
+            std.debug.print("FAILED at size {d}: {}\n", .{ size, err });
+            return err;
+        };
+
+        // Verify content was written
+        try tmp_file.seekTo(0);
+        const written = try tmp_file.readToEndAlloc(std.testing.allocator, size * 2);
+        defer std.testing.allocator.free(written);
+
+        try std.testing.expectEqual(size + 1, written.len); // +1 for newline
+    }
+}
