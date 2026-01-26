@@ -71,10 +71,16 @@ utf8_len: u3,
 paste_buf: []u8,
 /// Current paste length
 paste_len: usize,
+/// Owned buffer for last emitted paste event
+paste_event_buf: []u8,
+/// Length of last emitted paste event
+paste_event_len: usize,
 /// Allocator for paste buffer
 allocator: std.mem.Allocator,
 /// Whether paste buffer is allocated
 paste_allocated: bool,
+/// Whether paste event buffer is allocated
+paste_event_allocated: bool,
 /// Buffer for potential end sequence during paste
 paste_end_buf: [paste_end_seq.len]u8,
 /// How many bytes of potential end sequence we've matched
@@ -98,8 +104,11 @@ pub fn init(allocator: std.mem.Allocator) Decoder {
         .utf8_len = 0,
         .paste_buf = &.{},
         .paste_len = 0,
+        .paste_event_buf = &.{},
+        .paste_event_len = 0,
         .allocator = allocator,
         .paste_allocated = false,
+        .paste_event_allocated = false,
         .paste_end_buf = undefined,
         .paste_end_len = 0,
     };
@@ -110,6 +119,10 @@ pub fn deinit(self: *Decoder) void {
     if (self.paste_allocated) {
         self.allocator.free(self.paste_buf);
         self.paste_allocated = false;
+    }
+    if (self.paste_event_allocated) {
+        self.allocator.free(self.paste_event_buf);
+        self.paste_event_allocated = false;
     }
 }
 
@@ -348,9 +361,16 @@ fn handlePaste(self: *Decoder, byte: u8) !Result {
         // Check if we've matched the complete end sequence
         if (self.paste_end_len == paste_end_seq.len) {
             // Found end of paste - return the paste content
-            const paste_content = self.paste_buf[0..self.paste_len];
+            const paste_len = self.paste_len;
             self.state = .ground;
             self.paste_end_len = 0;
+            try self.ensurePasteEventCapacity(paste_len);
+            if (paste_len > 0) {
+                @memcpy(self.paste_event_buf[0..paste_len], self.paste_buf[0..paste_len]);
+            }
+            self.paste_event_len = paste_len;
+            self.paste_len = 0;
+            const paste_content = self.paste_event_buf[0..self.paste_event_len];
             return Result{ .event = .{ .paste = paste_content } };
         }
         return .none;
@@ -385,6 +405,21 @@ fn appendPasteByte(self: *Decoder, byte: u8) !void {
     }
     self.paste_buf[self.paste_len] = byte;
     self.paste_len += 1;
+}
+
+fn ensurePasteEventCapacity(self: *Decoder, needed: usize) !void {
+    if (needed == 0) {
+        return;
+    }
+    if (self.paste_event_allocated) {
+        if (self.paste_event_buf.len >= needed) {
+            return;
+        }
+        self.paste_event_buf = try self.allocator.realloc(self.paste_event_buf, needed);
+    } else {
+        self.paste_event_buf = try self.allocator.alloc(u8, needed);
+        self.paste_event_allocated = true;
+    }
 }
 
 /// Handle UTF-8 continuation bytes
