@@ -111,6 +111,9 @@ pub fn invalidatePlaneMove(self: *Compositor, plane: *const Plane, old_x: i32, o
 /// typically not needed for content changes. However, structural changes (move,
 /// visibility changes) still require explicit invalidation.
 pub fn compose(self: *Compositor, root: *Plane) ![]const Rect {
+    // If composition fails, force a full redraw next frame to avoid lost dirty state.
+    errdefer self.needs_full_redraw = true;
+
     // Collect all dirty regions for this frame
     var frame_dirty: std.ArrayList(Rect) = .empty;
     defer frame_dirty.deinit(self.allocator);
