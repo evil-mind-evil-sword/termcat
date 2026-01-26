@@ -324,6 +324,12 @@ pub const Attributes = packed struct {
     }
 };
 
+/// Sentinel value for wide character continuation cells (second half).
+/// When a wide character (e.g., CJK characters) occupies two columns,
+/// the first cell contains the actual character and the second cell
+/// has `char = WIDE_CONTINUATION` to indicate it's a continuation.
+pub const WIDE_CONTINUATION: u21 = 0;
+
 /// The default cell used for clear() and out-of-bounds reads
 pub const default: Cell = .{
     .char = ' ',
@@ -358,13 +364,13 @@ pub fn styled(char: u21, fg: Color, bg: Color, attrs: Attributes) Cell {
 
 /// Check if this is a continuation cell (second half of wide character)
 pub fn isContinuation(self: Cell) bool {
-    return self.char == 0;
+    return self.char == WIDE_CONTINUATION;
 }
 
 /// Create a continuation cell (for wide character second half)
 pub fn continuation(fg: Color, bg: Color, attrs: Attributes) Cell {
     return .{
-        .char = 0,
+        .char = WIDE_CONTINUATION,
         .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
         .fg = fg,
         .bg = bg,
@@ -410,7 +416,7 @@ test "Cell default" {
 test "Cell continuation" {
     const cell = continuation(.default, .default, .{});
     try std.testing.expect(cell.isContinuation());
-    try std.testing.expectEqual(@as(u21, 0), cell.char);
+    try std.testing.expectEqual(WIDE_CONTINUATION, cell.char);
 }
 
 test "Color equality" {
