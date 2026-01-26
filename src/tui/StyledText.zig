@@ -183,6 +183,37 @@ fn stylesEqual(a: Style, b: Style) bool {
     return a.fg.eql(b.fg) and a.bg.eql(b.bg) and a.attrs.eql(b.attrs);
 }
 
+/// Owned styled text with span storage managed by the caller.
+pub const OwnedStyledText = struct {
+    /// The text content (UTF-8)
+    text: []const u8,
+    /// Owned style spans
+    spans: []Span,
+    /// Default style for unstyled regions
+    default_style: Style,
+    /// Allocator that owns `spans`
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    /// Release owned spans.
+    pub fn deinit(self: *Self) void {
+        if (self.spans.len > 0) {
+            self.allocator.free(self.spans);
+        }
+        self.spans = &.{};
+    }
+
+    /// Create a borrowed StyledText view.
+    pub fn view(self: *const Self) StyledText {
+        return .{
+            .text = self.text,
+            .spans = self.spans,
+            .default_style = self.default_style,
+        };
+    }
+};
+
 // ============================================================================
 // Builder pattern for convenience
 // ============================================================================
@@ -223,12 +254,14 @@ pub const StyledTextBuilder = struct {
         return self;
     }
 
-    /// Build the StyledText (spans slice is owned by builder, valid until deinit)
-    pub fn build(self: *const Self) StyledText {
+    /// Build owned StyledText spans (caller must deinit the returned object).
+    pub fn build(self: *Self) !OwnedStyledText {
+        const spans = try self.spans.toOwnedSlice();
         return .{
             .text = self.text,
-            .spans = self.spans.items,
+            .spans = spans,
             .default_style = self.default_style,
+            .allocator = self.spans.allocator,
         };
     }
 };
@@ -352,7 +385,9 @@ test "StyledTextBuilder" {
     _ = try builder.addSpan(0, 5, .{ .attrs = .{ .bold = true } });
     _ = try builder.addSpan(7, 12, .{ .fg = Cell.Color.red });
 
-    const st = builder.build();
+    var owned = try builder.build();
+    defer owned.deinit();
+    const st = owned.view();
     try std.testing.expectEqual(@as(usize, 2), st.spans.len);
 
     const style0 = st.styleAt(0);

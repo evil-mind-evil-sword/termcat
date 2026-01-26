@@ -26,6 +26,7 @@ pub const Style = theme_mod.Style;
 // Styled text (Phase 4)
 const styled_text_mod = @import("StyledText.zig");
 pub const StyledText = styled_text_mod.StyledText;
+pub const OwnedStyledText = styled_text_mod.OwnedStyledText;
 pub const StyledTextBuilder = styled_text_mod.StyledTextBuilder;
 pub const Span = styled_text_mod.Span;
 
