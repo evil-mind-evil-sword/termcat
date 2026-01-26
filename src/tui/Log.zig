@@ -45,7 +45,8 @@ pub const LogEntry = struct {
 
 /// Log widget
 pub const Log = struct {
-    /// Log entries
+    /// Log entries. Prefer append/appendOwned; direct mutation must keep text
+    /// alive or set owned=true with allocator-owned text.
     entries: std.ArrayList(LogEntry),
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -118,13 +119,9 @@ pub const Log = struct {
 
     // Content methods
 
-    /// Append a log entry (does not own text)
+    /// Append a log entry (copies text)
     pub fn append(self: *Log, text: []const u8, level: LogLevel) !void {
-        try self.entries.append(.{ .text = text, .level = level, .owned = false });
-        self.pruneIfNeeded();
-        if (self.auto_scroll) {
-            self.scroll_offset = 0;
-        }
+        try self.appendOwned(text, level);
     }
 
     /// Append a log entry (owns text, will free on clear/deinit)

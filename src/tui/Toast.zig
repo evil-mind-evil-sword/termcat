@@ -49,7 +49,8 @@ pub const ToastMessage = struct {
 
 /// Toast container widget
 pub const Toast = struct {
-    /// Active toasts (most recent at end)
+    /// Active toasts (most recent at end). Prefer show(); if you mutate
+    /// directly, keep text alive or set owned=true with allocator-owned text.
     toasts: std.ArrayList(ToastMessage),
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -316,7 +317,8 @@ test "Toast tick expires" {
     defer toast.deinit();
 
     // Add toast with 2 ticks remaining
-    try toast.toasts.append(.{ .text = "Test", .level = .info, .remaining_ticks = 2, .owned = false });
+    try toast.info("Test");
+    toast.toasts.items[0].remaining_ticks = 2;
 
     try std.testing.expectEqual(@as(usize, 1), toast.count());
 
