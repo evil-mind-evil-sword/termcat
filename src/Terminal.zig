@@ -529,17 +529,36 @@ pub fn peekEvent(self: *Terminal) !?Event.Event {
 
 /// Handle terminal resize.
 fn handleResize(self: *Terminal, new_size: Size) !void {
-    // Resize renderer
+    const old_size = self.root.size();
+
+    if (old_size.width == new_size.width and old_size.height == new_size.height) {
+        return;
+    }
+
+    var root_resized = false;
+    errdefer {
+        if (root_resized) {
+            // Best-effort rollback to keep renderer/root sizes consistent.
+            _ = self.root.resize(old_size) catch {};
+        }
+
+        // Ensure the next frame redraws fully after any partial resize attempt.
+        self.compositor.invalidateAll();
+        self.dirty = true;
+    }
+
+    // Resize root plane first so renderer resize failure can roll back cleanly.
+    try self.root.resize(new_size);
+    root_resized = true;
+
+    // Resize renderer buffers.
     try self.renderer.resize(new_size);
 
-    // Resize root plane
-    try self.root.resize(new_size);
-
-    // Re-initialize compositor with new buffer
+    // Re-initialize compositor with new buffer.
     self.compositor.deinit();
     self.compositor = Compositor.init(self.allocator, self.renderer.buffer());
 
-    // Mark full redraw needed
+    // Mark full redraw needed.
     self.compositor.invalidateAll();
     self.dirty = true;
 }
