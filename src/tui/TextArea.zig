@@ -181,12 +181,18 @@ pub const TextArea = struct {
 
     /// Clear all content
     pub fn clear(self: *TextArea) !void {
-        for (self.lines.items) |*line| {
-            line.deinit(self.allocator);
+        if (self.lines.items.len == 0) {
+            const empty: std.ArrayListUnmanaged(u8) = .empty;
+            try self.lines.append(self.allocator, empty);
+        } else {
+            self.lines.items[0].deinit(self.allocator);
+            self.lines.items[0] = .empty;
+            var i: usize = 1;
+            while (i < self.lines.items.len) : (i += 1) {
+                self.lines.items[i].deinit(self.allocator);
+            }
+            self.lines.shrinkRetainingCapacity(1);
         }
-        self.lines.clearRetainingCapacity();
-        const empty: std.ArrayListUnmanaged(u8) = .empty;
-        try self.lines.append(self.allocator, empty);
         self.cursor_line = 0;
         self.cursor_col = 0;
         self.scroll_y = 0;
