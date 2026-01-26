@@ -315,31 +315,65 @@ pub const ScrollView = struct {
 
         switch (event) {
             .key => |key| {
-                // Handle scroll keys
-                if (key.codepoint == Event.Key.up or key.codepoint == 'k') {
-                    self.scrollBy(0, -1);
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.down or key.codepoint == 'j') {
-                    self.scrollBy(0, 1);
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.left or key.codepoint == 'h') {
-                    self.scrollBy(-1, 0);
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.right or key.codepoint == 'l') {
-                    self.scrollBy(1, 0);
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.page_up) {
-                    self.scrollBy(0, -10); // Page scroll
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.page_down) {
-                    self.scrollBy(0, 10);
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.home) {
-                    self.scroll_y = 0;
-                    return .consumed;
-                } else if (key.codepoint == Event.Key.end) {
-                    self.scroll_y = std.math.maxInt(u16); // Will be clamped
-                    return .consumed;
+                // Handle special keys (arrows, page up/down, home/end)
+                if (key.special) |special| {
+                    switch (special) {
+                        .up => {
+                            self.scrollBy(0, -1);
+                            return .consumed;
+                        },
+                        .down => {
+                            self.scrollBy(0, 1);
+                            return .consumed;
+                        },
+                        .left => {
+                            self.scrollBy(-1, 0);
+                            return .consumed;
+                        },
+                        .right => {
+                            self.scrollBy(1, 0);
+                            return .consumed;
+                        },
+                        .page_up => {
+                            self.scrollBy(0, -10);
+                            return .consumed;
+                        },
+                        .page_down => {
+                            self.scrollBy(0, 10);
+                            return .consumed;
+                        },
+                        .home => {
+                            self.scroll_y = 0;
+                            return .consumed;
+                        },
+                        .end => {
+                            self.scroll_y = std.math.maxInt(u16); // Will be clamped
+                            return .consumed;
+                        },
+                        else => {},
+                    }
+                }
+                // Handle vim-style scroll keys
+                if (key.codepoint) |cp| {
+                    switch (cp) {
+                        'k' => {
+                            self.scrollBy(0, -1);
+                            return .consumed;
+                        },
+                        'j' => {
+                            self.scrollBy(0, 1);
+                            return .consumed;
+                        },
+                        'h' => {
+                            self.scrollBy(-1, 0);
+                            return .consumed;
+                        },
+                        'l' => {
+                            self.scrollBy(1, 0);
+                            return .consumed;
+                        },
+                        else => {},
+                    }
                 }
             },
             .mouse => |mouse| {
@@ -500,8 +534,8 @@ test "ScrollView keyboard event handling" {
 
     const widget = Widget.Widget.init(ScrollView, &scroll);
 
-    // Test down key
-    const down_event = Event.Event{ .key = Event.Key.fromCodepoint(Event.Key.down, Event.Modifiers.none) };
+    // Test down key (special key)
+    const down_event = Event.Event{ .key = Event.Key.fromSpecial(.down, .{}) };
     const result = widget.handleEvent(down_event);
     try std.testing.expectEqual(Widget.EventResult.consumed, result);
     try std.testing.expectEqual(@as(u16, 1), scroll.scroll_y);
