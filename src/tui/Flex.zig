@@ -196,13 +196,13 @@ pub const Flex = struct {
             // Constraints couldn't be satisfied - render nothing
             return;
         }
-        const sizes = sizes_opt.?;
-        defer constraint_mod.freeSizes(std.heap.page_allocator, sizes);
+        var sizes = sizes_opt.?;
+        defer sizes.deinit();
 
         // Position and render each child
         var offset: u16 = 0;
         for (self.children[0..self.child_count], 0..) |child, i| {
-            const child_main_size = sizes[i];
+            const child_main_size = sizes.sizes[i];
 
             // Create sub-view for this child
             var child_view = switch (self.direction) {

@@ -21,6 +21,18 @@
 
 const std = @import("std");
 
+/// Owned sizes array returned by constraint resolution.
+/// Call deinit() to free the allocation.
+pub const OwnedSizes = struct {
+    allocator: std.mem.Allocator,
+    sizes: []u16,
+
+    pub fn deinit(self: *OwnedSizes) void {
+        self.allocator.free(self.sizes);
+        self.* = undefined;
+    }
+};
+
 /// A layout constraint specifying how much space a child widget should receive
 pub const Constraint = union(enum) {
     /// Exact size in cells - widget gets exactly this many cells
@@ -70,21 +82,23 @@ pub const Constraint = union(enum) {
 /// 2. Ensure minimum constraints get their minimum sizes
 /// 3. Distribute remaining space to ratio and minimum constraints
 ///
-/// Returns a list of sizes corresponding to each constraint, or null if
+/// Returns owned sizes corresponding to each constraint, or null if
 /// constraints cannot be satisfied (fixed + minimums exceed available space).
+/// Caller must call deinit() on the returned OwnedSizes.
 pub fn resolve(
     constraints: []const Constraint,
     available: u16,
-) ?[]u16 {
+) ?OwnedSizes {
     return resolveWithAllocator(std.heap.page_allocator, constraints, available);
 }
 
-/// Resolve constraints with a specific allocator
+/// Resolve constraints with a specific allocator.
+/// Caller must call deinit() on the returned OwnedSizes.
 pub fn resolveWithAllocator(
     allocator: std.mem.Allocator,
     constraints: []const Constraint,
     available: u16,
-) ?[]u16 {
+) ?OwnedSizes {
     if (constraints.len == 0) return null;
 
     const sizes = allocator.alloc(u16, constraints.len) catch return null;
@@ -180,7 +194,7 @@ pub fn resolveWithAllocator(
         }
     }
 
-    return sizes;
+    return .{ .allocator = allocator, .sizes = sizes };
 }
 
 /// Free sizes array allocated by resolve
@@ -222,10 +236,10 @@ test "Constraint.fill" {
 
 test "resolve: single fixed" {
     const constraints = [_]Constraint{.{ .fixed = 10 }};
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 10), sizes[0]);
+    try std.testing.expectEqual(@as(u16, 10), sizes.sizes[0]);
 }
 
 test "resolve: multiple fixed" {
@@ -234,12 +248,12 @@ test "resolve: multiple fixed" {
         .{ .fixed = 20 },
         .{ .fixed = 30 },
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 10), sizes[0]);
-    try std.testing.expectEqual(@as(u16, 20), sizes[1]);
-    try std.testing.expectEqual(@as(u16, 30), sizes[2]);
+    try std.testing.expectEqual(@as(u16, 10), sizes.sizes[0]);
+    try std.testing.expectEqual(@as(u16, 20), sizes.sizes[1]);
+    try std.testing.expectEqual(@as(u16, 30), sizes.sizes[2]);
 }
 
 test "resolve: fixed exceeds available" {
@@ -253,10 +267,10 @@ test "resolve: fixed exceeds available" {
 
 test "resolve: single ratio fills space" {
     const constraints = [_]Constraint{Constraint.fill()};
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 100), sizes[0]);
+    try std.testing.expectEqual(@as(u16, 100), sizes.sizes[0]);
 }
 
 test "resolve: two equal ratios" {
@@ -264,12 +278,12 @@ test "resolve: two equal ratios" {
         Constraint.fromRatio(1, 2),
         Constraint.fromRatio(1, 2),
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
     // Each gets 50 (1 / (1+1) * 100)
-    try std.testing.expectEqual(@as(u16, 50), sizes[0]);
-    try std.testing.expectEqual(@as(u16, 50), sizes[1]);
+    try std.testing.expectEqual(@as(u16, 50), sizes.sizes[0]);
+    try std.testing.expectEqual(@as(u16, 50), sizes.sizes[1]);
 }
 
 test "resolve: 1:2 ratio split" {
@@ -277,14 +291,14 @@ test "resolve: 1:2 ratio split" {
         Constraint.fromRatio(1, 3),
         Constraint.fromRatio(2, 3),
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 90).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 90).?;
+    defer sizes.deinit();
 
     // Total weight = 1 + 2 = 3
     // First: 1/3 * 90 = 30
     // Second: 2/3 * 90 = 60
-    try std.testing.expectEqual(@as(u16, 30), sizes[0]);
-    try std.testing.expectEqual(@as(u16, 60), sizes[1]);
+    try std.testing.expectEqual(@as(u16, 30), sizes.sizes[0]);
+    try std.testing.expectEqual(@as(u16, 60), sizes.sizes[1]);
 }
 
 test "resolve: fixed plus ratio" {
@@ -292,22 +306,22 @@ test "resolve: fixed plus ratio" {
         .{ .fixed = 20 },
         Constraint.fill(),
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 20), sizes[0]);
-    try std.testing.expectEqual(@as(u16, 80), sizes[1]);
+    try std.testing.expectEqual(@as(u16, 20), sizes.sizes[0]);
+    try std.testing.expectEqual(@as(u16, 80), sizes.sizes[1]);
 }
 
 test "resolve: minimum basic" {
     const constraints = [_]Constraint{
         .{ .minimum = 10 },
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
     // Minimum expands to fill
-    try std.testing.expectEqual(@as(u16, 100), sizes[0]);
+    try std.testing.expectEqual(@as(u16, 100), sizes.sizes[0]);
 }
 
 test "resolve: fixed with minimum" {
@@ -315,12 +329,12 @@ test "resolve: fixed with minimum" {
         .{ .fixed = 30 },
         .{ .minimum = 10 },
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 30), sizes[0]);
+    try std.testing.expectEqual(@as(u16, 30), sizes.sizes[0]);
     // Minimum gets its base (10) plus remaining (70) = 70 extra (weight 1 out of 1)
-    try std.testing.expectEqual(@as(u16, 70), sizes[1]);
+    try std.testing.expectEqual(@as(u16, 70), sizes.sizes[1]);
 }
 
 test "resolve: multiple minimums share equally" {
@@ -328,13 +342,13 @@ test "resolve: multiple minimums share equally" {
         .{ .minimum = 10 },
         .{ .minimum = 10 },
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
     // Each starts at 10, remaining 80 split equally = 40 each extra
     // Total: 10 + 40 = 50 each
-    try std.testing.expectEqual(@as(u16, 50), sizes[0]);
-    try std.testing.expectEqual(@as(u16, 50), sizes[1]);
+    try std.testing.expectEqual(@as(u16, 50), sizes.sizes[0]);
+    try std.testing.expectEqual(@as(u16, 50), sizes.sizes[1]);
 }
 
 test "resolve: empty constraints" {
@@ -350,14 +364,14 @@ test "resolve: complex mixed example" {
         Constraint.fromRatio(1, 2),
         .{ .minimum = 5 },
     };
-    const sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
-    defer freeSizes(std.testing.allocator, sizes);
+    var sizes = resolveWithAllocator(std.testing.allocator, &constraints, 100).?;
+    defer sizes.deinit();
 
-    try std.testing.expectEqual(@as(u16, 10), sizes[0]);
+    try std.testing.expectEqual(@as(u16, 10), sizes.sizes[0]);
     // Remaining: 90 - 5 (min base) = 85 distributable
     // Total weight: 1 (ratio num) + 1 (min count) = 2
     // Ratio gets: 1/2 * 85 = 42
     // Min gets: 5 + (85 - 42) = 5 + 43 = 48
-    try std.testing.expectEqual(@as(u16, 45), sizes[1]); // 90 * 1 / 2 = 45
-    try std.testing.expectEqual(@as(u16, 45), sizes[2]); // 5 + 40 = 45
+    try std.testing.expectEqual(@as(u16, 45), sizes.sizes[1]); // 90 * 1 / 2 = 45
+    try std.testing.expectEqual(@as(u16, 45), sizes.sizes[2]); // 5 + 40 = 45
 }
