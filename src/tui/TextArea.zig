@@ -446,6 +446,7 @@ pub const TextArea = struct {
         // Split current line at cursor
         const current_line = &self.lines.items[self.cursor_line];
         var new_line: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer new_line.deinit(self.allocator);
 
         // Move content after cursor to new line
         if (self.cursor_col < current_line.items.len) {
