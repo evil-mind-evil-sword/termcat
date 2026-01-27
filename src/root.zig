@@ -31,6 +31,16 @@ pub const Surface = @import("Surface.zig");
 pub const Pixel = Surface.Pixel;
 pub const PixelBlitter = @import("PixelBlitter.zig");
 
+// Color utilities and inline TUI support
+pub const color = @import("color.zig");
+pub const Rgb = color.Rgb;
+pub const TerminalPalette = color.TerminalPalette;
+pub const @"inline" = @import("inline.zig");
+pub const StyledLine = @"inline".StyledLine;
+pub const StyledSpan = @"inline".StyledSpan;
+pub const RichLine = @"inline".RichLine;
+pub const HistoryRenderer = @"inline".HistoryRenderer;
+
 // Graphics protocols
 pub const graphics = struct {
     pub const Kitty = @import("graphics/kitty.zig").KittyGraphics;

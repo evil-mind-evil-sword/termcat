@@ -55,6 +55,7 @@ pub const freeConstraintSizes = constraint_mod.freeSizes;
 
 // Basic widgets (Phase 2)
 pub const Label = @import("Label.zig").Label;
+pub const Paragraph = @import("Paragraph.zig").Paragraph;
 pub const Button = @import("Button.zig").Button;
 const progress_mod = @import("ProgressBar.zig");
 pub const ProgressBar = progress_mod.ProgressBar;

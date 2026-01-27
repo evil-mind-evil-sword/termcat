@@ -180,7 +180,7 @@ pub const Collapsible = struct {
             },
             .mouse => |mouse| {
                 // Click on title row toggles
-                if (mouse.button == .left and mouse.button_state == .released and mouse.y == 0) {
+                if (mouse.button == .left and mouse.y == 0) {
                     self.toggle();
                     return .consumed;
                 }

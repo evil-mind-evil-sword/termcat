@@ -8,6 +8,7 @@ const Input = @import("../input/Input.zig");
 const Cell = @import("../Cell.zig");
 const signal = @import("../signal.zig");
 const resize = @import("../resize.zig");
+const color = @import("../color.zig");
 
 /// Color depth capability levels (re-exported from Cell.zig)
 pub const ColorDepth = Cell.ColorDepth;
@@ -56,6 +57,9 @@ pub const InitOptions = struct {
     /// Use force_enable for terminals that support Kitty graphics but aren't detected
     /// (e.g., tmux with passthrough enabled), or force_disable to suppress detection.
     kitty_graphics: CapabilityOverride = .auto,
+    /// Use alternate screen buffer. Set to false for inline TUI mode where
+    /// content persists in terminal scrollback after exit.
+    alt_screen: bool = true,
 };
 
 /// POSIX terminal backend
@@ -225,7 +229,11 @@ pub const PosixBackend = struct {
     /// Write cleanup sequences ignoring errors (for error path cleanup)
     fn writeCleanupSequencesIgnoreErrors(self: *Self) void {
         // Disable sync output first to ensure subsequent sequences are applied immediately
-        const cleanup_seq = "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l";
+        // Build cleanup sequence conditionally based on alt_screen setting
+        const cleanup_seq = if (self.options.alt_screen)
+            "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[?25h\x1b[0m\x1b[?1049l"
+        else
+            "\x1b[?2026l\x1b[?1004l\x1b[?2004l\x1b[?1003l\x1b[?1006l\x1b[0m";
         _ = posix.write(self.tty_fd, cleanup_seq) catch {};
     }
 
@@ -324,11 +332,14 @@ pub const PosixBackend = struct {
     fn writeInitSequences(self: *Self) !void {
         const w = self.output_buffer.writer(self.allocator);
 
-        // Enter alternate screen buffer
-        try w.writeAll("\x1b[?1049h");
-
-        // Hide cursor
-        try w.writeAll("\x1b[?25l");
+        // Enter alternate screen buffer (if enabled)
+        if (self.options.alt_screen) {
+            try w.writeAll("\x1b[?1049h");
+            // Hide cursor in alt screen mode
+            try w.writeAll("\x1b[?25l");
+            // Clear screen and move to home
+            try w.writeAll("\x1b[2J\x1b[H");
+        }
 
         // Enable mouse if requested and supported
         if (self.options.enable_mouse and self.capabilities.mouse) {
@@ -346,9 +357,6 @@ pub const PosixBackend = struct {
         if (self.options.enable_focus_events and self.capabilities.focus_events) {
             try w.writeAll("\x1b[?1004h");
         }
-
-        // Clear screen and move to home
-        try w.writeAll("\x1b[2J\x1b[H");
 
         try self.flushOutput();
     }
@@ -378,14 +386,16 @@ pub const PosixBackend = struct {
             try w.writeAll("\x1b[?1006l");
         }
 
-        // Show cursor
-        try w.writeAll("\x1b[?25h");
-
         // Reset attributes
         try w.writeAll("\x1b[0m");
 
-        // Exit alternate screen buffer
-        try w.writeAll("\x1b[?1049l");
+        // Exit alternate screen buffer (if enabled)
+        if (self.options.alt_screen) {
+            // Show cursor
+            try w.writeAll("\x1b[?25h");
+            // Exit alt screen
+            try w.writeAll("\x1b[?1049l");
+        }
 
         try self.flushOutput();
     }
@@ -447,6 +457,218 @@ pub const PosixBackend = struct {
         if (self.options.enable_synchronized_output and self.capabilities.synchronized_output) {
             try self.output_buffer.appendSlice(self.allocator, "\x1b[?2026l");
         }
+    }
+
+    // =========================================================================
+    // Scroll Region Support (DECSTBM)
+    // =========================================================================
+    //
+    // These methods support inline TUI mode where content is pushed into
+    // terminal scrollback rather than using the alternate screen buffer.
+    // Used by history insertion to move completed messages above the viewport.
+
+    /// Set scroll region (DECSTBM - DEC Set Top and Bottom Margins).
+    /// Restricts scrolling to lines between top and bottom (1-indexed, inclusive).
+    ///
+    /// After setting, cursor is moved to top-left of the scroll region.
+    /// Reset with resetScrollRegion() when done.
+    ///
+    /// Example: setScrollRegion(1, 10) restricts scrolling to lines 1-10.
+    pub fn setScrollRegion(self: *Self, top: u16, bottom: u16) !void {
+        var buf: [24]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d};{d}r", .{ top, bottom }) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Reset scroll region to full screen (DECSTBM with no parameters).
+    /// Restores scrolling to the entire terminal.
+    pub fn resetScrollRegion(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b[r");
+    }
+
+    /// Move cursor to specific position (1-indexed).
+    /// CUP - Cursor Position.
+    pub fn setCursorPosition(self: *Self, row: u16, col: u16) !void {
+        var buf: [24]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ row, col }) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Save cursor position (DECSC).
+    pub fn saveCursor(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b7");
+    }
+
+    /// Restore cursor position (DECRC).
+    pub fn restoreCursor(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b8");
+    }
+
+    /// Scroll the scroll region up by one line (RI - Reverse Index).
+    /// When cursor is at top margin, this creates a new blank line at top
+    /// and pushes content down (or into scrollback if at top of screen).
+    pub fn reverseIndex(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1bM");
+    }
+
+    /// Scroll the scroll region up by n lines.
+    /// Emits n reverse index commands to push content into scrollback.
+    pub fn scrollRegionUp(self: *Self, lines: u16) !void {
+        for (0..lines) |_| {
+            try self.reverseIndex();
+        }
+    }
+
+    /// Scroll the scroll region down by one line (IND - Index).
+    /// Moves cursor down one line, scrolling if at bottom margin.
+    pub fn index(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1bD");
+    }
+
+    /// Scroll the scroll region down by n lines.
+    pub fn scrollRegionDown(self: *Self, lines: u16) !void {
+        for (0..lines) |_| {
+            try self.index();
+        }
+    }
+
+    /// Insert blank lines at cursor position (IL).
+    /// Pushes lines below cursor down within scroll region.
+    pub fn insertLines(self: *Self, count: u16) !void {
+        if (count == 0) return;
+        var buf: [16]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d}L", .{count}) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Delete lines at cursor position (DL).
+    /// Pulls lines below cursor up within scroll region.
+    pub fn deleteLines(self: *Self, count: u16) !void {
+        if (count == 0) return;
+        var buf: [16]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d}M", .{count}) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    // =========================================================================
+    // Terminal Palette Detection (OSC 10/11)
+    // =========================================================================
+    //
+    // Query terminal for default foreground/background colors using OSC sequences.
+    // Response format: \x1b]1X;rgb:RRRR/GGGG/BBBB\x1b\\ or similar
+    //
+    // This enables adaptive theming - detecting if terminal has light or dark
+    // background and adjusting UI colors accordingly.
+
+    /// Query terminal for default foreground and background colors.
+    ///
+    /// This is a synchronous query that:
+    /// 1. Sends OSC 10 and 11 queries
+    /// 2. Waits briefly for response (with timeout)
+    /// 3. Parses the response to extract RGB values
+    ///
+    /// Returns null if the terminal doesn't respond or response can't be parsed.
+    /// Some terminals (especially older ones) don't support these queries.
+    ///
+    /// Note: This should be called before entering raw mode, or terminal
+    /// input must be carefully managed to avoid consuming the response.
+    pub fn queryTerminalPalette(self: *Self) ?color.TerminalPalette {
+        // Flush any pending output first
+        self.flushOutput() catch return null;
+
+        // Send OSC 10 (fg) and OSC 11 (bg) queries
+        // Format: \x1b]10;?\x1b\\ and \x1b]11;?\x1b\\
+        // Some terminals use BEL (\x07) instead of ST (\x1b\\)
+        const query = "\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+        _ = posix.write(self.tty_fd, query) catch return null;
+
+        // Wait for response with timeout
+        var fds = [_]posix.pollfd{
+            .{
+                .fd = self.input_fd,
+                .events = posix.POLL.IN,
+                .revents = 0,
+            },
+        };
+
+        // 100ms timeout - most terminals respond quickly
+        const result = posix.poll(&fds, 100) catch return null;
+        if (result == 0) return null; // Timeout, no response
+
+        // Read response
+        var response_buf: [256]u8 = undefined;
+        const n = posix.read(self.input_fd, &response_buf) catch return null;
+        if (n == 0) return null;
+
+        const response = response_buf[0..n];
+
+        // Parse responses
+        const fg = parseOscColorResponse(response, 10);
+        const bg = parseOscColorResponse(response, 11);
+
+        if (fg == null and bg == null) return null;
+
+        return color.TerminalPalette.init(fg, bg);
+    }
+
+    /// Parse an OSC color response to extract RGB values.
+    /// Response format: \x1b]1X;rgb:RRRR/GGGG/BBBB\x1b\\ or \x1b]1X;rgb:RRRR/GGGG/BBBB\x07
+    /// The RGB values are 4 hex digits each (16-bit), we take the high byte.
+    fn parseOscColorResponse(response: []const u8, osc_code: u8) ?color.Rgb {
+        // Look for OSC start with specific code
+        var i: usize = 0;
+        while (i + 10 < response.len) : (i += 1) {
+            // Check for \x1b]1X; pattern
+            if (response[i] == 0x1b and i + 1 < response.len and response[i + 1] == ']') {
+                // Parse the OSC number
+                var j = i + 2;
+                var osc_num: u8 = 0;
+                while (j < response.len and response[j] >= '0' and response[j] <= '9') : (j += 1) {
+                    osc_num = osc_num *| 10 +| (response[j] - '0');
+                }
+
+                if (osc_num != osc_code) continue;
+                if (j >= response.len or response[j] != ';') continue;
+                j += 1;
+
+                // Look for "rgb:" prefix
+                if (j + 4 >= response.len) continue;
+                if (!std.mem.eql(u8, response[j..][0..4], "rgb:")) continue;
+                j += 4;
+
+                // Parse RRRR/GGGG/BBBB
+                const r_high = parseHexNibble(response, j, 2) orelse continue;
+                j += 4; // Skip RRRR
+                if (j >= response.len or response[j] != '/') continue;
+                j += 1;
+
+                const g_high = parseHexNibble(response, j, 2) orelse continue;
+                j += 4; // Skip GGGG
+                if (j >= response.len or response[j] != '/') continue;
+                j += 1;
+
+                const b_high = parseHexNibble(response, j, 2) orelse continue;
+
+                return .{ r_high, g_high, b_high };
+            }
+        }
+        return null;
+    }
+
+    /// Parse high byte from hex string at position (first 2 digits of 4-digit hex).
+    fn parseHexNibble(buf: []const u8, pos: usize, count: usize) ?u8 {
+        if (pos + count > buf.len) return null;
+        var value: u8 = 0;
+        for (buf[pos..][0..count]) |c| {
+            const digit: u8 = switch (c) {
+                '0'...'9' => c - '0',
+                'a'...'f' => c - 'a' + 10,
+                'A'...'F' => c - 'A' + 10,
+                else => return null,
+            };
+            value = value *| 16 +| digit;
+        }
+        return value;
     }
 
     /// Install SIGWINCH handler with reference counting (delegates to shared resize module).

@@ -63,6 +63,9 @@ pub const InitOptions = struct {
     /// Use force_enable for terminals that support Kitty graphics via ConPTY,
     /// or force_disable to suppress detection.
     kitty_graphics: CapabilityOverride = .auto,
+    /// Use alternate screen buffer. Set to false for inline TUI mode where
+    /// content persists in terminal scrollback after exit.
+    alt_screen: bool = true,
 };
 
 /// Windows console backend
@@ -194,7 +197,11 @@ pub const WindowsBackend = struct {
     /// Write cleanup sequences ignoring errors (for error path cleanup)
     fn writeCleanupSequencesIgnoreErrors(self: *Self) void {
         // Disable sync output first to ensure subsequent sequences are applied immediately
-        const cleanup_seq = "\x1b[?2026l\x1b[?25h\x1b[0m\x1b[?1049l";
+        // Build cleanup sequence conditionally based on alt_screen setting
+        const cleanup_seq = if (self.options.alt_screen)
+            "\x1b[?2026l\x1b[?25h\x1b[0m\x1b[?1049l"
+        else
+            "\x1b[?2026l\x1b[0m";
         var written: windows.DWORD = 0;
         _ = windows.kernel32.WriteConsoleA(
             self.stdout_handle,
@@ -297,14 +304,14 @@ pub const WindowsBackend = struct {
     fn writeInitSequences(self: *Self) !void {
         const w = self.output_buffer.writer(self.allocator);
 
-        // Enter alternate screen buffer
-        try w.writeAll("\x1b[?1049h");
-
-        // Hide cursor
-        try w.writeAll("\x1b[?25l");
-
-        // Clear screen and move to home
-        try w.writeAll("\x1b[2J\x1b[H");
+        // Enter alternate screen buffer (if enabled)
+        if (self.options.alt_screen) {
+            try w.writeAll("\x1b[?1049h");
+            // Hide cursor in alt screen mode
+            try w.writeAll("\x1b[?25l");
+            // Clear screen and move to home
+            try w.writeAll("\x1b[2J\x1b[H");
+        }
 
         try self.flushOutput();
     }
@@ -318,14 +325,16 @@ pub const WindowsBackend = struct {
             try w.writeAll("\x1b[?2026l");
         }
 
-        // Show cursor
-        try w.writeAll("\x1b[?25h");
-
         // Reset attributes
         try w.writeAll("\x1b[0m");
 
-        // Exit alternate screen buffer
-        try w.writeAll("\x1b[?1049l");
+        // Exit alternate screen buffer (if enabled)
+        if (self.options.alt_screen) {
+            // Show cursor
+            try w.writeAll("\x1b[?25h");
+            // Exit alt screen
+            try w.writeAll("\x1b[?1049l");
+        }
 
         try self.flushOutput();
     }
@@ -396,6 +405,100 @@ pub const WindowsBackend = struct {
         if (self.options.enable_synchronized_output and self.capabilities.synchronized_output) {
             try self.output_buffer.appendSlice(self.allocator, "\x1b[?2026l");
         }
+    }
+
+    // =========================================================================
+    // Scroll Region Support (DECSTBM)
+    // =========================================================================
+    //
+    // These methods support inline TUI mode where content is pushed into
+    // terminal scrollback rather than using the alternate screen buffer.
+    // Used by history insertion to move completed messages above the viewport.
+    //
+    // Note: These use VT sequences which work on Windows Terminal but may
+    // have limited support on legacy conhost.
+
+    /// Set scroll region (DECSTBM - DEC Set Top and Bottom Margins).
+    /// Restricts scrolling to lines between top and bottom (1-indexed, inclusive).
+    ///
+    /// After setting, cursor is moved to top-left of the scroll region.
+    /// Reset with resetScrollRegion() when done.
+    ///
+    /// Example: setScrollRegion(1, 10) restricts scrolling to lines 1-10.
+    pub fn setScrollRegion(self: *Self, top: u16, bottom: u16) !void {
+        var buf: [24]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d};{d}r", .{ top, bottom }) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Reset scroll region to full screen (DECSTBM with no parameters).
+    /// Restores scrolling to the entire terminal.
+    pub fn resetScrollRegion(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b[r");
+    }
+
+    /// Move cursor to specific position (1-indexed).
+    /// CUP - Cursor Position.
+    pub fn setCursorPosition(self: *Self, row: u16, col: u16) !void {
+        var buf: [24]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d};{d}H", .{ row, col }) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Save cursor position (DECSC).
+    pub fn saveCursor(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b7");
+    }
+
+    /// Restore cursor position (DECRC).
+    pub fn restoreCursor(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1b8");
+    }
+
+    /// Scroll the scroll region up by one line (RI - Reverse Index).
+    /// When cursor is at top margin, this creates a new blank line at top
+    /// and pushes content down (or into scrollback if at top of screen).
+    pub fn reverseIndex(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1bM");
+    }
+
+    /// Scroll the scroll region up by n lines.
+    /// Emits n reverse index commands to push content into scrollback.
+    pub fn scrollRegionUp(self: *Self, lines: u16) !void {
+        for (0..lines) |_| {
+            try self.reverseIndex();
+        }
+    }
+
+    /// Scroll the scroll region down by one line (IND - Index).
+    /// Moves cursor down one line, scrolling if at bottom margin.
+    pub fn index(self: *Self) !void {
+        try self.output_buffer.appendSlice(self.allocator, "\x1bD");
+    }
+
+    /// Scroll the scroll region down by n lines.
+    pub fn scrollRegionDown(self: *Self, lines: u16) !void {
+        for (0..lines) |_| {
+            try self.index();
+        }
+    }
+
+    /// Insert blank lines at cursor position (IL).
+    /// Pushes lines below cursor down within scroll region.
+    pub fn insertLines(self: *Self, count: u16) !void {
+        if (count == 0) return;
+        var buf: [16]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d}L", .{count}) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
+    }
+
+    /// Delete lines at cursor position (DL).
+    /// Pulls lines below cursor up within scroll region.
+    pub fn deleteLines(self: *Self, count: u16) !void {
+        if (count == 0) return;
+        var buf: [16]u8 = undefined;
+        const seq = std.fmt.bufPrint(&buf, "\x1b[{d}M", .{count}) catch return error.FormatError;
+        try self.output_buffer.appendSlice(self.allocator, seq);
     }
 
     /// Update the terminal size (called after resize)

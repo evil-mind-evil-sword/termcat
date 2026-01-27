@@ -128,7 +128,7 @@ pub const Link = struct {
                 }
             },
             .mouse => |mouse| {
-                if (mouse.button == .left and mouse.button_state == .released) {
+                if (mouse.button == .left) {
                     if (self.on_click) |callback| {
                         callback(self.callback_ctx, self.url);
                     }

@@ -179,7 +179,7 @@ pub const Checkbox = struct {
                 }
             },
             .mouse => |mouse| {
-                if (mouse.button == .left and mouse.button_state == .released) {
+                if (mouse.button == .left) {
                     _ = self.toggle();
                     return .consumed;
                 }
@@ -314,7 +314,7 @@ pub const RadioButton = struct {
                 }
             },
             .mouse => |mouse| {
-                if (mouse.button == .left and mouse.button_state == .released) {
+                if (mouse.button == .left) {
                     self.select();
                     return .consumed;
                 }
@@ -461,7 +461,7 @@ pub const Switch = struct {
                 }
             },
             .mouse => |mouse| {
-                if (mouse.button == .left and mouse.button_state == .released) {
+                if (mouse.button == .left) {
                     _ = self.toggle();
                     return .consumed;
                 }

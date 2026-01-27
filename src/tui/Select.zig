@@ -284,7 +284,7 @@ pub const Select = struct {
                 }
             },
             .mouse => |mouse| {
-                if (mouse.button == .left and mouse.button_state == .released) {
+                if (mouse.button == .left) {
                     if (mouse.y == 0) {
                         self.toggle();
                     } else if (self.expanded) {

@@ -285,7 +285,7 @@ pub const Diff = struct {
         }
     }
 
-    fn renderUnified(self: *Diff, view: *PlaneView, size: struct { width: u16, height: u16 }) void {
+    fn renderUnified(self: *Diff, view: *PlaneView, size: Event.Size) void {
         const visible_count = @min(self.lines.len -| self.scroll_offset, size.height);
 
         for (0..visible_count) |i| {
@@ -372,7 +372,7 @@ pub const Diff = struct {
         }
     }
 
-    fn renderSideBySide(self: *Diff, view: *PlaneView, size: struct { width: u16, height: u16 }) void {
+    fn renderSideBySide(self: *Diff, view: *PlaneView, size: Event.Size) void {
         const half_width = size.width / 2;
         const visible_count = @min(self.lines.len -| self.scroll_offset, size.height);
 
