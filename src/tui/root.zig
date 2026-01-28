@@ -167,6 +167,7 @@ pub const HitTester = hittest_mod.HitTester;
 pub const HitResult = hittest_mod.HitResult;
 pub const HitOptions = hittest_mod.HitOptions;
 pub const HitRect = hittest_mod.Rect;
+pub const HitGrid = @import("HitGrid.zig").HitGrid;
 
 // Event routing (Phase 1)
 const eventrouter_mod = @import("EventRouter.zig");
