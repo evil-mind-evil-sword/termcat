@@ -23,6 +23,24 @@ pub const TextArea = struct {
         end: Position,
     };
 
+    pub const WrapMode = enum {
+        none,
+        soft,
+        word,
+    };
+
+    const VisualLine = struct {
+        line_idx: usize,
+        start: usize,
+        end: usize,
+        is_continuation: bool,
+    };
+
+    const VisualCursor = struct {
+        index: usize,
+        column: usize,
+    };
+
     /// Text content buffer
     buffer: TextBuffer,
     /// Allocator for dynamic content
@@ -38,6 +56,8 @@ pub const TextArea = struct {
     visible_height: u16 = 10,
     /// Show line numbers
     show_line_numbers: bool = false,
+    /// Wrapping behavior
+    wrap_mode: WrapMode = .none,
     /// Text style
     style: Style = .{},
     /// Cursor style
@@ -93,6 +113,16 @@ pub const TextArea = struct {
     /// Set line numbers visibility
     pub fn withLineNumbers(self: *TextArea, show: bool) *TextArea {
         self.show_line_numbers = show;
+        return self;
+    }
+
+    /// Set wrapping behavior
+    pub fn withWrapMode(self: *TextArea, mode: WrapMode) *TextArea {
+        self.wrap_mode = mode;
+        if (mode != .none) {
+            self.scroll_x = 0;
+        }
+        self.ensureCursorVisible();
         return self;
     }
 
@@ -204,20 +234,37 @@ pub const TextArea = struct {
 
     /// Move cursor up
     pub fn cursorUp(self: *TextArea) void {
-        if (self.cursor_line > 0) {
-            self.cursor_line -= 1;
-            self.clampCursorCol();
-            self.ensureCursorVisible();
+        if (!self.wrapEnabled()) {
+            if (self.cursor_line > 0) {
+                self.cursor_line -= 1;
+                self.clampCursorCol();
+                self.ensureCursorVisible();
+            }
+            return;
         }
+
+        const current = self.cursorVisual() orelse return;
+        if (current.index == 0) return;
+        const target = self.visualLineForIndex(current.index - 1) orelse return;
+        self.setCursorFromVisual(target.line_idx, target.start, target.end, current.column);
     }
 
     /// Move cursor down
     pub fn cursorDown(self: *TextArea) void {
-        if (self.cursor_line + 1 < self.buffer.lineCount()) {
-            self.cursor_line += 1;
-            self.clampCursorCol();
-            self.ensureCursorVisible();
+        if (!self.wrapEnabled()) {
+            if (self.cursor_line + 1 < self.buffer.lineCount()) {
+                self.cursor_line += 1;
+                self.clampCursorCol();
+                self.ensureCursorVisible();
+            }
+            return;
         }
+
+        const current = self.cursorVisual() orelse return;
+        const total = self.totalVisualLines();
+        if (current.index + 1 >= total) return;
+        const target = self.visualLineForIndex(current.index + 1) orelse return;
+        self.setCursorFromVisual(target.line_idx, target.start, target.end, current.column);
     }
 
     /// Move cursor left (UTF-8 aware)
@@ -282,6 +329,13 @@ pub const TextArea = struct {
         return @intCast(@min(unicode.stringWidth(slice), std.math.maxInt(u16)));
     }
 
+    fn displayWidthBetween(text: []const u8, start: usize, end: usize) u16 {
+        const clamped_start = @min(start, text.len);
+        const clamped_end = @min(end, text.len);
+        if (clamped_end <= clamped_start) return 0;
+        return @intCast(@min(unicode.stringWidth(text[clamped_start..clamped_end]), std.math.maxInt(u16)));
+    }
+
     /// Find byte position for a target display column.
     /// Returns the byte index where display width reaches or exceeds target_col.
     /// Always returns a valid codepoint boundary.
@@ -306,6 +360,79 @@ pub const TextArea = struct {
         if (pos + len > line.len) return line[pos];
         return std.unicode.utf8Decode(line[pos..][0..len]) catch line[pos];
     }
+
+    fn wrapWidth(self: *const TextArea) u16 {
+        const line_num_width: u16 = if (self.show_line_numbers) 5 else 0;
+        return if (self.visible_width > line_num_width) self.visible_width - line_num_width else 0;
+    }
+
+    fn wrapEnabled(self: *const TextArea) bool {
+        return self.wrap_mode != .none;
+    }
+
+    const WrapIter = struct {
+        line: []const u8,
+        width: u16,
+        mode: WrapMode,
+        byte_index: usize,
+
+        fn init(line: []const u8, width: u16, mode: WrapMode) WrapIter {
+            return .{
+                .line = line,
+                .width = width,
+                .mode = mode,
+                .byte_index = 0,
+            };
+        }
+
+        fn next(self: *WrapIter) ?struct { start: usize, end: usize } {
+            if (self.byte_index >= self.line.len) return null;
+            const start = self.byte_index;
+            if (self.width == 0) {
+                self.byte_index = self.line.len;
+                return .{ .start = start, .end = self.line.len };
+            }
+
+            var display_col: usize = 0;
+            var last_break: ?usize = null;
+            var idx = self.byte_index;
+
+            while (idx < self.line.len) {
+                const lead = self.line[idx];
+                const cp_len = std.unicode.utf8ByteSequenceLength(lead) catch 1;
+                const safe_len = @min(cp_len, self.line.len - idx);
+                const cp = std.unicode.utf8Decode(self.line[idx..][0..safe_len]) catch @as(u21, lead);
+                const cp_width = unicode.codePointWidth(cp);
+                const next_display = display_col + cp_width;
+
+                if (self.mode == .word and cp <= 0x7F and std.ascii.isWhitespace(@intCast(cp))) {
+                    last_break = idx + safe_len;
+                }
+
+                if (next_display > self.width) {
+                    if (display_col == 0) {
+                        idx += safe_len;
+                        display_col = next_display;
+                    } else if (self.mode == .word) {
+                        if (last_break) |break_pos| {
+                            if (break_pos > start) {
+                                self.byte_index = break_pos;
+                                return .{ .start = start, .end = break_pos };
+                            }
+                        }
+                    }
+                    self.byte_index = idx;
+                    return .{ .start = start, .end = idx };
+                }
+
+                display_col = next_display;
+                idx += safe_len;
+            }
+
+            self.byte_index = self.line.len;
+            return .{ .start = start, .end = self.line.len };
+        }
+    };
 
     /// Move to start of line
     pub fn cursorHome(self: *TextArea) void {
@@ -340,31 +467,155 @@ pub const TextArea = struct {
         }
     }
 
-    fn ensureCursorVisible(self: *TextArea) void {
-        // Vertical scroll
-        if (self.cursor_line < self.scroll_y) {
-            self.scroll_y = self.cursor_line;
-        } else if (self.cursor_line >= self.scroll_y + self.visible_height) {
-            self.scroll_y = self.cursor_line - self.visible_height + 1;
+    fn visualLineCountForLine(self: *const TextArea, line_idx: usize) usize {
+        if (line_idx >= self.buffer.lineCount()) return 0;
+        if (!self.wrapEnabled()) return 1;
+        const width = self.wrapWidth();
+        if (width == 0) return 1;
+        const line = self.buffer.lineSlice(line_idx);
+        var iter = WrapIter.init(line, width, self.wrap_mode);
+        var count: usize = 0;
+        while (iter.next()) |_| {
+            count += 1;
+        }
+        if (count == 0) return 1;
+        return count;
+    }
+
+    fn totalVisualLines(self: *const TextArea) usize {
+        if (!self.wrapEnabled()) return self.buffer.lineCount();
+        var total: usize = 0;
+        var line_idx: usize = 0;
+        while (line_idx < self.buffer.lineCount()) : (line_idx += 1) {
+            total += self.visualLineCountForLine(line_idx);
+        }
+        return total;
+    }
+
+    fn visualLineForIndex(self: *const TextArea, visual_index: usize) ?VisualLine {
+        if (!self.wrapEnabled()) {
+            if (visual_index >= self.buffer.lineCount()) return null;
+            const line = self.buffer.lineSlice(visual_index);
+            return .{ .line_idx = visual_index, .start = 0, .end = line.len, .is_continuation = false };
         }
 
-        // Horizontal scroll - work in display columns, then convert back to bytes
-        const text_width = if (self.show_line_numbers) self.visible_width -| 5 else self.visible_width;
-        if (self.cursor_line >= self.buffer.lineCount()) return;
+        const width = self.wrapWidth();
+        if (width == 0) {
+            if (visual_index >= self.buffer.lineCount()) return null;
+            return .{ .line_idx = visual_index, .start = 0, .end = 0, .is_continuation = false };
+        }
+
+        var remaining = visual_index;
+        var line_idx: usize = 0;
+        while (line_idx < self.buffer.lineCount()) : (line_idx += 1) {
+            const line = self.buffer.lineSlice(line_idx);
+            var iter = WrapIter.init(line, width, self.wrap_mode);
+            var segment_idx: usize = 0;
+            while (iter.next()) |segment| {
+                if (remaining == 0) {
+                    return .{
+                        .line_idx = line_idx,
+                        .start = segment.start,
+                        .end = segment.end,
+                        .is_continuation = segment_idx > 0,
+                    };
+                }
+                remaining -= 1;
+                segment_idx += 1;
+            }
+        }
+        return null;
+    }
+
+    fn cursorVisual(self: *const TextArea) ?VisualCursor {
+        if (self.cursor_line >= self.buffer.lineCount()) return null;
         const line = self.buffer.lineSlice(self.cursor_line);
+        if (!self.wrapEnabled()) {
+            return .{
+                .index = self.cursor_line,
+                .column = displayWidthUpTo(line, self.cursor_col),
+            };
+        }
 
-        // Convert byte positions to display columns for comparison
-        const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
-        const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
+        const width = self.wrapWidth();
+        if (width == 0) {
+            return .{
+                .index = self.cursor_line,
+                .column = 0,
+            };
+        }
 
-        if (cursor_display_col < scroll_display_col) {
-            // Cursor is left of visible area - scroll left to cursor
-            self.scroll_x = self.cursor_col;
-        } else if (cursor_display_col >= scroll_display_col + text_width) {
-            // Cursor is right of visible area - scroll right
-            // Find the byte position where display width reaches (cursor_display_col - text_width + 1)
-            const target_scroll_col = cursor_display_col - text_width + 1;
-            self.scroll_x = byteIndexForDisplayColumn(line, target_scroll_col);
+        var index: usize = 0;
+        var line_idx: usize = 0;
+        while (line_idx < self.cursor_line) : (line_idx += 1) {
+            index += self.visualLineCountForLine(line_idx);
+        }
+
+        var iter = WrapIter.init(line, width, self.wrap_mode);
+        while (iter.next()) |segment| {
+            if (self.cursor_col < segment.end or (segment.end == line.len and self.cursor_col == segment.end)) {
+                const segment_slice = line[segment.start..segment.end];
+                const col_in_segment = self.cursor_col - segment.start;
+                return .{
+                    .index = index,
+                    .column = displayWidthUpTo(segment_slice, col_in_segment),
+                };
+            }
+            index += 1;
+        }
+
+        return .{
+            .index = index,
+            .column = displayWidthUpTo(line, self.cursor_col),
+        };
+    }
+
+    fn setCursorFromVisual(self: *TextArea, line_idx: usize, segment_start: usize, segment_end: usize, desired_col: usize) void {
+        self.cursor_line = line_idx;
+        const line = self.buffer.lineSlice(line_idx);
+        const segment_slice = line[segment_start..segment_end];
+        const offset = byteIndexForDisplayColumn(segment_slice, desired_col);
+        self.cursor_col = segment_start + offset;
+        self.clampCursorCol();
+        self.ensureCursorVisible();
+    }
+
+    fn ensureCursorVisible(self: *TextArea) void {
+        if (!self.wrapEnabled()) {
+            // Vertical scroll
+            if (self.cursor_line < self.scroll_y) {
+                self.scroll_y = self.cursor_line;
+            } else if (self.cursor_line >= self.scroll_y + self.visible_height) {
+                self.scroll_y = self.cursor_line - self.visible_height + 1;
+            }
+
+            // Horizontal scroll - work in display columns, then convert back to bytes
+            const text_width = if (self.show_line_numbers) self.visible_width -| 5 else self.visible_width;
+            if (self.cursor_line >= self.buffer.lineCount()) return;
+            const line = self.buffer.lineSlice(self.cursor_line);
+
+            // Convert byte positions to display columns for comparison
+            const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
+            const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
+
+            if (cursor_display_col < scroll_display_col) {
+                // Cursor is left of visible area - scroll left to cursor
+                self.scroll_x = self.cursor_col;
+            } else if (cursor_display_col >= scroll_display_col + text_width) {
+                // Cursor is right of visible area - scroll right
+                // Find the byte position where display width reaches (cursor_display_col - text_width + 1)
+                const target_scroll_col = cursor_display_col - text_width + 1;
+                self.scroll_x = byteIndexForDisplayColumn(line, target_scroll_col);
+            }
+            return;
+        }
+
+        self.scroll_x = 0;
+        const cursor_visual = self.cursorVisual() orelse return;
+        if (cursor_visual.index < self.scroll_y) {
+            self.scroll_y = cursor_visual.index;
+        } else if (cursor_visual.index >= self.scroll_y + self.visible_height) {
+            self.scroll_y = cursor_visual.index - self.visible_height + 1;
         }
     }
 
@@ -581,12 +832,94 @@ pub const TextArea = struct {
 
         if (size.width == 0 or size.height == 0) return;
 
+        if (!self.wrapEnabled()) {
+            const line_num_width: u16 = if (self.show_line_numbers) 5 else 0;
+            const text_start_x = line_num_width;
+
+            var y: u16 = 0;
+            while (y < size.height) : (y += 1) {
+                const line_idx = self.scroll_y + y;
+
+                // Clear line
+                var x: i32 = 0;
+                while (x < size.width) : (x += 1) {
+                    view.setCell(x, @intCast(y), .{
+                        .char = ' ',
+                        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+                        .fg = self.style.fg,
+                        .bg = self.style.bg,
+                        .attrs = .{},
+                    });
+                }
+
+                // Draw line number
+                if (self.show_line_numbers and line_idx < self.buffer.lineCount()) {
+                    var num_buf: [8]u8 = undefined;
+                    const num_str = std.fmt.bufPrint(&num_buf, "{d:>4} ", .{line_idx + 1}) catch "???? ";
+                    view.print(0, @intCast(y), num_str, self.line_number_style.fg, self.line_number_style.bg, .{});
+                }
+
+                // Draw line content
+                if (line_idx < self.buffer.lineCount()) {
+                    const line = self.buffer.lineSlice(line_idx);
+                    // scroll_x is always on a valid codepoint boundary (enforced by ensureCursorVisible)
+                    const start_byte = @min(self.scroll_x, line.len);
+
+                    if (start_byte < line.len) {
+                        // Pass the rest of the line from scroll position; PlaneView.print clips to view bounds
+                        view.print(@intCast(text_start_x), @intCast(y), line[start_byte..], self.style.fg, self.style.bg, self.style.attrs);
+                    }
+
+                    // Draw selection highlight
+                    if (self.selectionSpanForLine(line_idx)) |span| {
+                        const line_len = line.len;
+                        const sel_start = @min(span.start_col, line_len);
+                        const sel_end = @min(span.end_col, line_len);
+                        if (sel_end > sel_start) {
+                            const scroll_byte = @min(self.scroll_x, line_len);
+                            if (sel_end > scroll_byte) {
+                                const visible_start = @max(sel_start, scroll_byte);
+                                if (visible_start < sel_end) {
+                                    const sel_x = text_start_x +
+                                        displayWidthUpTo(line, visible_start) -|
+                                        displayWidthUpTo(line, scroll_byte);
+                                    if (sel_x < size.width) {
+                                        view.print(@intCast(sel_x), @intCast(y), line[visible_start..sel_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Draw cursor
+                    if (self.widget_state.focused and line_idx == self.cursor_line) {
+                        // Calculate display width up to cursor position (not byte offset)
+                        const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
+                        const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
+                        const cursor_x = text_start_x + cursor_display_col -| scroll_display_col;
+                        if (cursor_x < size.width) {
+                            // Decode the actual codepoint at cursor position
+                            const cursor_char: u21 = decodeCodepointAt(line, self.cursor_col);
+                            view.setCell(@intCast(cursor_x), @intCast(y), .{
+                                .char = cursor_char,
+                                .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+                                .fg = self.cursor_style.fg,
+                                .bg = self.cursor_style.bg,
+                                .attrs = self.cursor_style.attrs,
+                            });
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
         const line_num_width: u16 = if (self.show_line_numbers) 5 else 0;
         const text_start_x = line_num_width;
 
         var y: u16 = 0;
         while (y < size.height) : (y += 1) {
-            const line_idx = self.scroll_y + y;
+            const visual_index = self.scroll_y + y;
 
             // Clear line
             var x: i32 = 0;
@@ -600,53 +933,45 @@ pub const TextArea = struct {
                 });
             }
 
-            // Draw line number
-            if (self.show_line_numbers and line_idx < self.buffer.lineCount()) {
+            const visual = self.visualLineForIndex(visual_index) orelse continue;
+            const line_idx = visual.line_idx;
+            const line = self.buffer.lineSlice(line_idx);
+
+            // Draw line number only on the first visual segment
+            if (self.show_line_numbers and !visual.is_continuation) {
                 var num_buf: [8]u8 = undefined;
                 const num_str = std.fmt.bufPrint(&num_buf, "{d:>4} ", .{line_idx + 1}) catch "???? ";
                 view.print(0, @intCast(y), num_str, self.line_number_style.fg, self.line_number_style.bg, .{});
             }
 
-            // Draw line content
-            if (line_idx < self.buffer.lineCount()) {
-                const line = self.buffer.lineSlice(line_idx);
-                // scroll_x is always on a valid codepoint boundary (enforced by ensureCursorVisible)
-                const start_byte = @min(self.scroll_x, line.len);
+            if (visual.start < visual.end) {
+                view.print(@intCast(text_start_x), @intCast(y), line[visual.start..visual.end], self.style.fg, self.style.bg, self.style.attrs);
+            }
 
-                if (start_byte < line.len) {
-                    // Pass the rest of the line from scroll position; PlaneView.print clips to view bounds
-                    view.print(@intCast(text_start_x), @intCast(y), line[start_byte..], self.style.fg, self.style.bg, self.style.attrs);
-                }
-
-                // Draw selection highlight
-                if (self.selectionSpanForLine(line_idx)) |span| {
-                    const line_len = line.len;
-                    const sel_start = @min(span.start_col, line_len);
-                    const sel_end = @min(span.end_col, line_len);
-                    if (sel_end > sel_start) {
-                        const scroll_byte = @min(self.scroll_x, line_len);
-                        if (sel_end > scroll_byte) {
-                            const visible_start = @max(sel_start, scroll_byte);
-                            if (visible_start < sel_end) {
-                                const sel_x = text_start_x +
-                                    displayWidthUpTo(line, visible_start) -|
-                                    displayWidthUpTo(line, scroll_byte);
-                                if (sel_x < size.width) {
-                                    view.print(@intCast(sel_x), @intCast(y), line[visible_start..sel_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
-                                }
-                            }
-                        }
+            // Draw selection highlight
+            if (self.selectionSpanForLine(line_idx)) |span| {
+                const line_len = line.len;
+                const sel_start = @min(span.start_col, line_len);
+                const sel_end = @min(span.end_col, line_len);
+                const seg_start = @min(visual.start, line_len);
+                const seg_end = @min(visual.end, line_len);
+                const visible_start = @max(sel_start, seg_start);
+                const visible_end = @min(sel_end, seg_end);
+                if (visible_end > visible_start) {
+                    const sel_x = text_start_x + displayWidthBetween(line, seg_start, visible_start);
+                    if (sel_x < size.width) {
+                        view.print(@intCast(sel_x), @intCast(y), line[visible_start..visible_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
                     }
                 }
+            }
 
-                // Draw cursor
-                if (self.widget_state.focused and line_idx == self.cursor_line) {
-                    // Calculate display width up to cursor position (not byte offset)
-                    const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
-                    const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
-                    const cursor_x = text_start_x + cursor_display_col -| scroll_display_col;
+            // Draw cursor
+            if (self.widget_state.focused and line_idx == self.cursor_line) {
+                const line_len = line.len;
+                const in_segment = self.cursor_col < visual.end or (visual.end == line_len and self.cursor_col == visual.end);
+                if (self.cursor_col >= visual.start and in_segment) {
+                    const cursor_x = text_start_x + displayWidthBetween(line, visual.start, self.cursor_col);
                     if (cursor_x < size.width) {
-                        // Decode the actual codepoint at cursor position
                         const cursor_char: u21 = decodeCodepointAt(line, self.cursor_col);
                         view.setCell(@intCast(cursor_x), @intCast(y), .{
                             .char = cursor_char,
@@ -815,6 +1140,29 @@ test "TextArea cursor navigation" {
     try std.testing.expectEqual(@as(usize, 3), ta.cursor_col);
 
     ta.cursorHome();
+    try std.testing.expectEqual(@as(usize, 0), ta.cursor_col);
+}
+
+test "TextArea cursor navigation with soft wrap" {
+    var ta = try TextArea.init(std.testing.allocator);
+    defer ta.deinit();
+
+    try ta.setText("HelloWorld\nBye");
+    _ = ta.withSize(4, 4).withWrapMode(.soft);
+
+    ta.cursor_line = 0;
+    ta.cursor_col = 0;
+
+    ta.cursorDown();
+    try std.testing.expectEqual(@as(usize, 0), ta.cursor_line);
+    try std.testing.expectEqual(@as(usize, 4), ta.cursor_col);
+
+    ta.cursorDown();
+    try std.testing.expectEqual(@as(usize, 0), ta.cursor_line);
+    try std.testing.expectEqual(@as(usize, 8), ta.cursor_col);
+
+    ta.cursorDown();
+    try std.testing.expectEqual(@as(usize, 1), ta.cursor_line);
     try std.testing.expectEqual(@as(usize, 0), ta.cursor_col);
 }
 
