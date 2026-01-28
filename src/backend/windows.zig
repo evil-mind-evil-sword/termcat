@@ -21,6 +21,8 @@ const Size = Event.Size;
 const PixelSize = Event.PixelSize;
 const CellPixelSize = Event.CellPixelSize;
 const Cell = @import("../Cell.zig");
+const unicode = @import("../unicode/width.zig");
+const env_overrides = @import("env_overrides.zig");
 
 /// Color depth capability levels (re-exported from Cell.zig)
 pub const ColorDepth = Cell.ColorDepth;
@@ -29,6 +31,10 @@ pub const ColorDepth = Cell.ColorDepth;
 pub const Capabilities = struct {
     /// Detected color depth
     color_depth: ColorDepth,
+    /// Unicode width calculation mode
+    width_mode: unicode.WidthMode,
+    /// Whether explicit width (Unicode 2027) is enabled
+    explicit_width: bool,
     /// Whether the terminal supports mouse input
     mouse: bool,
     /// Whether the terminal supports bracketed paste
@@ -826,15 +832,36 @@ pub fn detectCapabilitiesWithOptions(options: ?InitOptions) Capabilities {
     if (wt_session) |s| std.heap.page_allocator.free(s);
 
     // Kitty graphics may be supported via terminals running on Windows (WezTerm, etc.)
-    // Apply override if provided
-    const kitty_graphics = if (options) |opts| switch (opts.kitty_graphics) {
-        .auto => supportsKittyGraphicsWindows(),
-        .force_enable => true,
-        .force_disable => false,
-    } else supportsKittyGraphicsWindows();
+    var kitty_graphics = supportsKittyGraphicsWindows();
+
+    // Apply environment overrides (if present)
+    const overrides = env_overrides.read();
+    var color_depth: ColorDepth = .true_color;
+    if (overrides.color_depth) |override_depth| {
+        color_depth = override_depth;
+    }
+    if (overrides.kitty_graphics) |override_graphics| {
+        kitty_graphics = override_graphics;
+    }
+    if (overrides.width_mode) |override_mode| {
+        unicode.setWidthMode(override_mode);
+    }
+    const width_mode = overrides.width_mode orelse unicode.getWidthMode();
+    const explicit_width = overrides.explicit_width orelse false;
+
+    // Apply InitOptions overrides last (explicit programmatic control)
+    if (options) |opts| {
+        kitty_graphics = switch (opts.kitty_graphics) {
+            .auto => kitty_graphics,
+            .force_enable => true,
+            .force_disable => false,
+        };
+    }
 
     return Capabilities{
-        .color_depth = .true_color,
+        .color_depth = color_depth,
+        .width_mode = width_mode,
+        .explicit_width = explicit_width,
         .mouse = true,
         .bracketed_paste = false, // Not natively supported
         .focus_events = true,

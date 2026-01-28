@@ -9,6 +9,8 @@ const Cell = @import("../Cell.zig");
 const signal = @import("../signal.zig");
 const resize = @import("../resize.zig");
 const color = @import("../color.zig");
+const unicode = @import("../unicode/width.zig");
+const env_overrides = @import("env_overrides.zig");
 
 /// Color depth capability levels (re-exported from Cell.zig)
 pub const ColorDepth = Cell.ColorDepth;
@@ -17,6 +19,10 @@ pub const ColorDepth = Cell.ColorDepth;
 pub const Capabilities = struct {
     /// Detected color depth
     color_depth: ColorDepth,
+    /// Unicode width calculation mode
+    width_mode: unicode.WidthMode,
+    /// Whether explicit width (Unicode 2027) is enabled
+    explicit_width: bool,
     /// Whether the terminal supports mouse input
     mouse: bool,
     /// Whether the terminal supports bracketed paste
@@ -854,21 +860,42 @@ pub fn detectCapabilitiesWithOptions(options: ?InitOptions) Capabilities {
     const colorterm = std.posix.getenv("COLORTERM") orelse "";
 
     // Detect color depth
-    const color_depth = detectColorDepth(term, colorterm);
+    var color_depth = detectColorDepth(term, colorterm);
 
     // Check if terminal is known to support advanced features
     // Default to conservative (false) for unknown terminals
     const is_modern = isModernTerminal(term);
 
     // Detect Kitty graphics support, applying override if provided
-    const kitty_graphics = if (options) |opts| switch (opts.kitty_graphics) {
-        .auto => supportsKittyGraphics(term),
-        .force_enable => true,
-        .force_disable => false,
-    } else supportsKittyGraphics(term);
+    var kitty_graphics = supportsKittyGraphics(term);
+
+    // Apply environment overrides (if present)
+    const overrides = env_overrides.read();
+    if (overrides.color_depth) |override_depth| {
+        color_depth = override_depth;
+    }
+    if (overrides.kitty_graphics) |override_graphics| {
+        kitty_graphics = override_graphics;
+    }
+    if (overrides.width_mode) |override_mode| {
+        unicode.setWidthMode(override_mode);
+    }
+    const width_mode = overrides.width_mode orelse unicode.getWidthMode();
+    const explicit_width = overrides.explicit_width orelse false;
+
+    // Apply InitOptions overrides last (explicit programmatic control)
+    if (options) |opts| {
+        kitty_graphics = switch (opts.kitty_graphics) {
+            .auto => kitty_graphics,
+            .force_enable => true,
+            .force_disable => false,
+        };
+    }
 
     return Capabilities{
         .color_depth = color_depth,
+        .width_mode = width_mode,
+        .explicit_width = explicit_width,
         .mouse = is_modern,
         .bracketed_paste = is_modern,
         .focus_events = is_modern,

@@ -1,5 +1,21 @@
 const std = @import("std");
 
+pub const WidthMode = enum {
+    unicode,
+    wcwidth,
+    no_zwj,
+};
+
+var width_mode: WidthMode = .unicode;
+
+pub fn setWidthMode(mode: WidthMode) void {
+    width_mode = mode;
+}
+
+pub fn getWidthMode() WidthMode {
+    return width_mode;
+}
+
 /// Returns the display width of a Unicode codepoint.
 /// - Returns 0 for control characters, combining marks, ZWJ, and variation selectors
 /// - Returns 1 for most characters (narrow/half-width)
@@ -10,6 +26,10 @@ const std = @import("std");
 /// Note: Complex emoji sequences (ZWJ sequences) are not fully supported;
 /// each codepoint is measured individually.
 pub fn codePointWidth(cp: u21) u2 {
+    if (width_mode == .no_zwj and cp == 0x200D) {
+        return 1;
+    }
+
     // Control characters have zero width
     if (cp < 0x20 or (cp >= 0x7F and cp < 0xA0)) {
         return 0;
@@ -194,6 +214,17 @@ test "stringWidth with ZWJ sequences" {
     // Note: Complex ZWJ emoji sequences are NOT fully supported in MVP
     // Each codepoint is measured individually, so 👨‍👩‍👧 (family emoji)
     // would count as sum of individual emoji widths, not 2
+}
+
+test "width mode no_zwj treats ZWJ as width 1" {
+    const prev = getWidthMode();
+    defer setWidthMode(prev);
+
+    setWidthMode(.no_zwj);
+    try std.testing.expectEqual(@as(u2, 1), codePointWidth(0x200D));
+
+    setWidthMode(.unicode);
+    try std.testing.expectEqual(@as(u2, 0), codePointWidth(0x200D));
 }
 
 test "variation selectors have width 0" {

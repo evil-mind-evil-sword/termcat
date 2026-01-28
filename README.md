@@ -422,6 +422,24 @@ try termcat.tui.Snapshot.expectWidget(
 
 Update snapshots with `TERMCAT_UPDATE_SNAPSHOTS=1`.
 
+## Environment Variables
+
+These override capability detection and width calculation for reproducible
+behavior across terminals.
+
+- `TERMCAT_COLOR_DEPTH`: `mono`, `basic`, `256`, or `truecolor`.
+- `TERMCAT_NO_GRAPHICS`: disable Kitty graphics detection.
+- `TERMCAT_FORCE_GRAPHICS`: force-enable Kitty graphics detection.
+- `TERMCAT_WIDTH_MODE`: `wcwidth`, `unicode`, or `no_zwj`.
+- `TERMCAT_FORCE_WCWIDTH`, `TERMCAT_FORCE_UNICODE`, `TERMCAT_FORCE_NO_ZWJ`:
+  shorthands for `TERMCAT_WIDTH_MODE`.
+- `TERMCAT_EXPLICIT_WIDTH`: `true|false` (reported in capabilities; reserved
+  for explicit-width mode support).
+
+Notes:
+- `TERMCAT_FORCE_GRAPHICS` wins over `TERMCAT_NO_GRAPHICS`.
+- Programmatic `InitOptions.kitty_graphics` overrides env vars.
+
 ## Limitations
 
 - No sixel graphics (Kitty protocol only)

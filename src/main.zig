@@ -8,9 +8,13 @@ pub fn main() !void {
     std.debug.print("Termcat - Terminal Capabilities\n", .{});
     std.debug.print("================================\n", .{});
     std.debug.print("Color depth: {s}\n", .{@tagName(caps.color_depth)});
+    std.debug.print("Width mode: {s}\n", .{@tagName(caps.width_mode)});
+    std.debug.print("Explicit width: {}\n", .{caps.explicit_width});
     std.debug.print("Mouse support: {}\n", .{caps.mouse});
     std.debug.print("Bracketed paste: {}\n", .{caps.bracketed_paste});
     std.debug.print("Focus events: {}\n", .{caps.focus_events});
+    std.debug.print("Synchronized output: {}\n", .{caps.synchronized_output});
+    std.debug.print("Kitty graphics: {}\n", .{caps.kitty_graphics});
 
     if (std.posix.getenv("TERM")) |term| {
         std.debug.print("TERM: {s}\n", .{term});
