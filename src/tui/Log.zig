@@ -38,15 +38,14 @@ pub const LogLevel = enum {
 
 /// A single log entry
 pub const LogEntry = struct {
-    text: []const u8,
+    text: []u8,
     level: LogLevel = .info,
-    owned: bool = false, // Whether we own the text memory
 };
 
 /// Log widget
 pub const Log = struct {
-    /// Log entries. Prefer append/appendOwned; direct mutation must keep text
-    /// alive or set owned=true with allocator-owned text.
+    /// Log entries. Prefer append/appendOwned; direct mutation must use
+    /// allocator-owned text (Log always frees stored text).
     entries: std.ArrayList(LogEntry),
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -77,9 +76,7 @@ pub const Log = struct {
     /// Clean up resources
     pub fn deinit(self: *Log) void {
         for (self.entries.items) |entry| {
-            if (entry.owned) {
-                self.allocator.free(entry.text);
-            }
+            self.allocator.free(entry.text);
         }
         self.entries.deinit();
     }
@@ -121,13 +118,17 @@ pub const Log = struct {
 
     /// Append a log entry (copies text)
     pub fn append(self: *Log, text: []const u8, level: LogLevel) !void {
-        try self.appendOwned(text, level);
+        const owned_text = try self.allocator.dupe(u8, text);
+        try self.entries.append(.{ .text = owned_text, .level = level });
+        self.pruneIfNeeded();
+        if (self.auto_scroll) {
+            self.scroll_offset = 0;
+        }
     }
 
-    /// Append a log entry (owns text, will free on clear/deinit)
-    pub fn appendOwned(self: *Log, text: []const u8, level: LogLevel) !void {
-        const owned_text = try self.allocator.dupe(u8, text);
-        try self.entries.append(.{ .text = owned_text, .level = level, .owned = true });
+    /// Append a log entry (takes ownership of text)
+    pub fn appendOwned(self: *Log, text: []u8, level: LogLevel) !void {
+        try self.entries.append(.{ .text = text, .level = level });
         self.pruneIfNeeded();
         if (self.auto_scroll) {
             self.scroll_offset = 0;
@@ -136,30 +137,28 @@ pub const Log = struct {
 
     /// Append info level
     pub fn info(self: *Log, text: []const u8) !void {
-        try self.appendOwned(text, .info);
+        try self.append(text, .info);
     }
 
     /// Append warning level
     pub fn warn(self: *Log, text: []const u8) !void {
-        try self.appendOwned(text, .warn);
+        try self.append(text, .warn);
     }
 
     /// Append error level
     pub fn err(self: *Log, text: []const u8) !void {
-        try self.appendOwned(text, .err);
+        try self.append(text, .err);
     }
 
     /// Append debug level
     pub fn debug(self: *Log, text: []const u8) !void {
-        try self.appendOwned(text, .debug);
+        try self.append(text, .debug);
     }
 
     /// Clear all entries
     pub fn clear(self: *Log) void {
         for (self.entries.items) |entry| {
-            if (entry.owned) {
-                self.allocator.free(entry.text);
-            }
+            self.allocator.free(entry.text);
         }
         self.entries.clearRetainingCapacity();
         self.scroll_offset = 0;
@@ -175,9 +174,7 @@ pub const Log = struct {
 
         while (self.entries.items.len > self.max_entries) {
             const removed = self.entries.orderedRemove(0);
-            if (removed.owned) {
-                self.allocator.free(removed.text);
-            }
+            self.allocator.free(removed.text);
         }
     }
 

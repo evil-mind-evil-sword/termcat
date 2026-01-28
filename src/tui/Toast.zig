@@ -39,18 +39,16 @@ pub const ToastLevel = enum {
 
 /// A single toast message
 pub const ToastMessage = struct {
-    text: []const u8,
+    text: []u8,
     level: ToastLevel = .info,
     /// Remaining display time in ticks (0 = dismiss)
     remaining_ticks: u32 = 50, // ~5 seconds at 10 ticks/sec
-    /// Whether text is owned
-    owned: bool = false,
 };
 
 /// Toast container widget
 pub const Toast = struct {
     /// Active toasts (most recent at end). Prefer show(); if you mutate
-    /// directly, keep text alive or set owned=true with allocator-owned text.
+    /// directly, use allocator-owned text (Toast always frees stored text).
     toasts: std.ArrayList(ToastMessage),
     /// Memory allocator
     allocator: std.mem.Allocator,
@@ -85,9 +83,7 @@ pub const Toast = struct {
     /// Clean up resources
     pub fn deinit(self: *Toast) void {
         for (self.toasts.items) |toast| {
-            if (toast.owned) {
-                self.allocator.free(toast.text);
-            }
+            self.allocator.free(toast.text);
         }
         self.toasts.deinit();
     }
@@ -126,7 +122,6 @@ pub const Toast = struct {
         try self.toasts.append(.{
             .text = owned_text,
             .level = level,
-            .owned = true,
         });
         self.pruneOldest();
     }
@@ -161,9 +156,7 @@ pub const Toast = struct {
             } else {
                 // Remove expired toast
                 const removed = self.toasts.orderedRemove(i);
-                if (removed.owned) {
-                    self.allocator.free(removed.text);
-                }
+                self.allocator.free(removed.text);
             }
         }
     }
@@ -171,9 +164,7 @@ pub const Toast = struct {
     /// Dismiss all toasts
     pub fn dismissAll(self: *Toast) void {
         for (self.toasts.items) |toast| {
-            if (toast.owned) {
-                self.allocator.free(toast.text);
-            }
+            self.allocator.free(toast.text);
         }
         self.toasts.clearRetainingCapacity();
     }
@@ -186,9 +177,7 @@ pub const Toast = struct {
     fn pruneOldest(self: *Toast) void {
         while (self.toasts.items.len > self.max_visible) {
             const removed = self.toasts.orderedRemove(0);
-            if (removed.owned) {
-                self.allocator.free(removed.text);
-            }
+            self.allocator.free(removed.text);
         }
     }
 
