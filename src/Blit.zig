@@ -5,6 +5,7 @@ const Plane = @import("Plane.zig").Plane;
 const Event = @import("Event.zig");
 const Rect = Event.Rect;
 const Size = Event.Size;
+const color = @import("color.zig");
 
 /// Blitting and sprite utilities for copying cell data between planes and buffers.
 ///
@@ -25,6 +26,10 @@ pub const BlitOptions = struct {
     /// If true, transparent cells in the source will not overwrite destination cells.
     /// Default: false (all cells are copied).
     transparent: bool = false,
+
+    /// If true, blend RGBA source colors over destination cells.
+    /// Default: false (direct copy).
+    alpha_blend: bool = false,
 
     /// Source region to copy from. If null, copies the entire source.
     /// Coordinates are relative to the source origin.
@@ -310,12 +315,12 @@ pub fn blitBufferToBuffer(
                         });
                     } else {
                         // Copy both the base and continuation cells
-                        dest.setCell(dest_x +| dx_u, dest_y +| dy_u, cell);
+                        writeCell(dest, dest_x +| dx_u, dest_y +| dy_u, cell, options);
                         const cont = src_buf.getCell(src_x +| dx_u + 1, src_y +| dy_u);
-                        dest.setCell(dest_x +| dx_u + 1, dest_y +| dy_u, cont);
+                        writeCell(dest, dest_x +| dx_u + 1, dest_y +| dy_u, cont, options);
                     }
                 } else {
-                    dest.setCell(dest_x +| dx_u, dest_y +| dy_u, cell);
+                    writeCell(dest, dest_x +| dx_u, dest_y +| dy_u, cell, options);
                 }
             }
         }
@@ -356,13 +361,13 @@ pub fn blitBufferToBuffer(
                         });
                     } else {
                         // Copy both the base and continuation cells
-                        dest.setCell(dest_x +| dx, dest_y +| dy, cell);
+                        writeCell(dest, dest_x +| dx, dest_y +| dy, cell, options);
                         const cont = src_buf.getCell(src_x +| dx + 1, src_y +| dy);
-                        dest.setCell(dest_x +| dx + 1, dest_y +| dy, cont);
+                        writeCell(dest, dest_x +| dx + 1, dest_y +| dy, cont, options);
                         dx += 1; // Skip the continuation in the next iteration
                     }
                 } else {
-                    dest.setCell(dest_x +| dx, dest_y +| dy, cell);
+                    writeCell(dest, dest_x +| dx, dest_y +| dy, cell, options);
                 }
             }
         }
@@ -380,6 +385,14 @@ fn isWideChar(buf: *const Buffer, x: u16, y: u16) bool {
     if (x + 1 >= buf.width) return false;
     const next = buf.getCell(x + 1, y);
     return next.isContinuation();
+}
+
+fn writeCell(dest: *Buffer, x: u16, y: u16, cell: Cell, options: BlitOptions) void {
+    if (options.alpha_blend and cell.hasAlpha()) {
+        dest.setCellBlended(x, y, cell);
+    } else {
+        dest.setCell(x, y, cell);
+    }
 }
 
 fn buffersAlias(dest: *const Buffer, src: *const Buffer) bool {
@@ -711,6 +724,26 @@ test "blitBufferToBuffer with transparency" {
     // Background should show through transparent cells
     try std.testing.expectEqual(@as(u21, 'A'), dest.getCell(1, 0).char); // 'A' from "BACKGROUND"
     try std.testing.expectEqual(@as(u21, 'K'), dest.getCell(3, 0).char); // 'K' from "BACKGROUND"
+}
+
+test "blitBufferToBuffer with alpha blending" {
+    const allocator = std.testing.allocator;
+
+    var dest = try Buffer.init(allocator, .{ .width = 1, .height = 1 });
+    defer dest.deinit();
+    dest.setCell(0, 0, Cell.styled('A', Cell.Color.white, Cell.Color.fromRgb(0, 0, 255), .{}));
+
+    var src = try Buffer.init(allocator, .{ .width = 1, .height = 1 });
+    defer src.deinit();
+    src.setCell(0, 0, Cell.styled(' ', .default, Cell.Color.fromRgba(255, 0, 0, 128), .{}));
+
+    blitBufferToBuffer(&dest, 0, 0, &src, .{ .alpha_blend = true });
+
+    const blended = dest.getCell(0, 0);
+    try std.testing.expectEqual(@as(u21, 'A'), blended.char);
+
+    const expected = color.blend(.{ 255, 0, 0 }, .{ 0, 0, 255 }, @as(f32, @floatFromInt(128)) / 255.0);
+    try std.testing.expect(blended.bg.eql(Cell.Color.fromRgb(expected[0], expected[1], expected[2])));
 }
 
 test "blitBufferToBuffer without transparency overwrites all" {

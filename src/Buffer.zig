@@ -2,6 +2,7 @@ const std = @import("std");
 const Cell = @import("Cell.zig");
 const Color = Cell.Color;
 const Attributes = Cell.Attributes;
+const color = @import("color.zig");
 const Event = @import("Event.zig");
 const Size = Event.Size;
 const Rect = Event.Rect;
@@ -129,6 +130,19 @@ fn index(self: Buffer, x: u16, y: u16) ?usize {
 pub fn setCell(self: *Buffer, x: u16, y: u16, cell: Cell) void {
     if (self.index(x, y)) |idx| {
         self.cells[idx] = cell;
+    }
+}
+
+/// Set cell at position with alpha blending over the existing cell.
+/// If the overlay has no alpha, this is equivalent to setCell.
+pub fn setCellBlended(self: *Buffer, x: u16, y: u16, overlay: Cell) void {
+    if (self.index(x, y)) |idx| {
+        if (!overlay.hasAlpha()) {
+            self.cells[idx] = overlay;
+            return;
+        }
+        const base = self.cells[idx];
+        self.cells[idx] = Cell.blendOver(overlay, base);
     }
 }
 
@@ -542,6 +556,23 @@ test "Buffer setCell and getCell" {
     buf.setCell(5, 2, cell);
     const got = buf.getCell(5, 2);
     try std.testing.expect(got.eql(cell));
+}
+
+test "Buffer setCellBlended blends background without glyph" {
+    var buf = try Buffer.init(std.testing.allocator, .{ .width = 1, .height = 1 });
+    defer buf.deinit();
+
+    const base = Cell.styled('A', Color.fromRgb(255, 255, 255), Color.fromRgb(0, 0, 255), .{});
+    buf.setCell(0, 0, base);
+
+    const overlay = Cell.styled(' ', .default, Color.fromRgba(255, 0, 0, 128), .{});
+    buf.setCellBlended(0, 0, overlay);
+
+    const blended = buf.getCell(0, 0);
+    try std.testing.expectEqual(@as(u21, 'A'), blended.char);
+
+    const expected = color.blend(.{ 255, 0, 0 }, .{ 0, 0, 255 }, @as(f32, @floatFromInt(128)) / 255.0);
+    try std.testing.expect(blended.bg.eql(Color.fromRgb(expected[0], expected[1], expected[2])));
 }
 
 test "Buffer out of bounds reads return default" {

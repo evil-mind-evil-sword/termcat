@@ -1,4 +1,5 @@
 const std = @import("std");
+const color_util = @import("color.zig");
 
 /// Single terminal cell
 pub const Cell = @This();
@@ -459,6 +460,70 @@ pub fn isTransparent(self: Cell) bool {
         self.bg.eql(.default) and
         self.attrs.eql(.{}) and
         !self.hasCombining();
+}
+
+/// Returns true if either foreground or background has alpha < 255.
+pub fn hasAlpha(self: Cell) bool {
+    return self.fg.alpha() < 255 or self.bg.alpha() < 255;
+}
+
+/// Blend an overlay cell over a base cell using per-color alpha.
+/// Overlay glyphs only replace the base if the overlay has visible glyph data.
+pub fn blendOver(overlay: Cell, base: Cell) Cell {
+    var result = base;
+
+    const bg_alpha = overlay.bg.alpha();
+    if (bg_alpha < 255) {
+        result.bg = blendColor(overlay.bg, base.bg, bg_alpha);
+    } else {
+        result.bg = overlay.bg;
+    }
+
+    const fg_alpha = overlay.fg.alpha();
+    const overlay_has_glyph = overlay.isContinuation() or
+        overlay.char != ' ' or
+        overlay.hasCombining() or
+        !overlay.attrs.eql(.{}) or
+        (fg_alpha > 0 and !overlay.fg.eql(.default));
+
+    if (overlay_has_glyph) {
+        result.char = overlay.char;
+        result.combining = overlay.combining;
+        result.attrs = overlay.attrs;
+
+        if (fg_alpha < 255) {
+            result.fg = blendColor(overlay.fg, result.bg, fg_alpha);
+        } else {
+            result.fg = overlay.fg;
+        }
+    }
+
+    return result;
+}
+
+fn blendColor(fg: Color, bg: Color, alpha: u8) Color {
+    if (alpha == 0) return bg;
+    if (alpha == 255) return fg;
+
+    const fg_rgb = fg.toRgb();
+    const bg_rgb = bg.toRgb();
+    const blended = color_util.blend(
+        .{ fg_rgb.r, fg_rgb.g, fg_rgb.b },
+        .{ bg_rgb.r, bg_rgb.g, bg_rgb.b },
+        @as(f32, @floatFromInt(alpha)) / 255.0,
+    );
+    return Color.fromRgb(blended[0], blended[1], blended[2]);
+}
+
+test "Cell blendOver blends background without glyph" {
+    const base = styled('A', Color.fromRgb(255, 255, 255), Color.fromRgb(0, 0, 255), .{});
+    const overlay = styled(' ', .default, Color.fromRgba(255, 0, 0, 128), .{});
+
+    const blended = blendOver(overlay, base);
+    try std.testing.expectEqual(@as(u21, 'A'), blended.char);
+
+    const expected = color_util.blend(.{ 255, 0, 0 }, .{ 0, 0, 255 }, @as(f32, @floatFromInt(128)) / 255.0);
+    try std.testing.expect(blended.bg.eql(Color.fromRgb(expected[0], expected[1], expected[2])));
 }
 
 test "Cell default" {
