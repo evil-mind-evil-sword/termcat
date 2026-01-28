@@ -30,6 +30,7 @@ pub const Layout = @import("Layout.zig");
 pub const Surface = @import("Surface.zig");
 pub const Pixel = Surface.Pixel;
 pub const PixelBlitter = @import("PixelBlitter.zig");
+pub const text = @import("text/root.zig");
 
 // Color utilities and inline TUI support
 pub const color = @import("color.zig");

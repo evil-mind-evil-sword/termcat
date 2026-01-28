@@ -9,11 +9,12 @@ const Style = @import("Theme.zig").Style;
 const Cell = @import("../Cell.zig");
 const Event = @import("../Event.zig");
 const unicode = @import("../unicode/width.zig");
+const TextBuffer = @import("../text/TextBuffer.zig").TextBuffer;
 
 /// TextArea widget for multi-line editing
 pub const TextArea = struct {
-    /// Text content (lines) - using ArrayListUnmanaged for Zig 0.15+ compatibility
-    lines: std.ArrayListUnmanaged(std.ArrayListUnmanaged(u8)) = .empty,
+    /// Text content buffer
+    buffer: TextBuffer,
     /// Allocator for dynamic content
     allocator: std.mem.Allocator,
     /// Cursor position
@@ -44,13 +45,10 @@ pub const TextArea = struct {
 
     /// Create an empty text area
     pub fn init(allocator: std.mem.Allocator) !TextArea {
-        var lines: std.ArrayListUnmanaged(std.ArrayListUnmanaged(u8)) = .empty;
-        // Start with one empty line
-        const first_line: std.ArrayListUnmanaged(u8) = .empty;
-        try lines.append(allocator, first_line);
+        const buffer = try TextBuffer.init(allocator);
 
         return .{
-            .lines = lines,
+            .buffer = buffer,
             .allocator = allocator,
         };
     }
@@ -64,10 +62,7 @@ pub const TextArea = struct {
 
     /// Clean up resources
     pub fn deinit(self: *TextArea) void {
-        for (self.lines.items) |*line| {
-            line.deinit(self.allocator);
-        }
-        self.lines.deinit(self.allocator);
+        self.buffer.deinit();
     }
 
     // Builder methods
@@ -110,25 +105,7 @@ pub const TextArea = struct {
     /// Note: Bypasses read_only to allow programmatic updates (e.g., history navigation)
     /// Use setTextForced for explicit bypass, or check read_only at the call site if needed.
     pub fn setText(self: *TextArea, content: []const u8) !void {
-        // Clear existing lines
-        for (self.lines.items) |*line| {
-            line.deinit(self.allocator);
-        }
-        self.lines.clearRetainingCapacity();
-
-        // Split by newlines
-        var iter = std.mem.splitScalar(u8, content, '\n');
-        while (iter.next()) |line_content| {
-            var new_line: std.ArrayListUnmanaged(u8) = .empty;
-            try new_line.appendSlice(self.allocator, line_content);
-            try self.lines.append(self.allocator, new_line);
-        }
-
-        // Ensure at least one line
-        if (self.lines.items.len == 0) {
-            const empty: std.ArrayListUnmanaged(u8) = .empty;
-            try self.lines.append(self.allocator, empty);
-        }
+        try self.buffer.setText(content);
 
         self.cursor_line = 0;
         self.cursor_col = 0;
@@ -138,29 +115,12 @@ pub const TextArea = struct {
 
     /// Get text content
     pub fn getText(self: *const TextArea, allocator: std.mem.Allocator) ![]u8 {
-        var total_len: usize = 0;
-        for (self.lines.items, 0..) |line, i| {
-            total_len += line.items.len;
-            if (i < self.lines.items.len - 1) total_len += 1; // newline
-        }
-
-        var result = try allocator.alloc(u8, total_len);
-        var pos: usize = 0;
-        for (self.lines.items, 0..) |line, i| {
-            @memcpy(result[pos .. pos + line.items.len], line.items);
-            pos += line.items.len;
-            if (i < self.lines.items.len - 1) {
-                result[pos] = '\n';
-                pos += 1;
-            }
-        }
-
-        return result;
+        return self.buffer.getText(allocator);
     }
 
     /// Get line count
     pub fn lineCount(self: *const TextArea) usize {
-        return self.lines.items.len;
+        return self.buffer.lineCount();
     }
 
     /// Check if cursor is on the first line
@@ -170,29 +130,18 @@ pub const TextArea = struct {
 
     /// Check if cursor is on the last line
     pub fn isOnLastLine(self: *const TextArea) bool {
-        return self.cursor_line + 1 >= self.lines.items.len;
+        return self.cursor_line + 1 >= self.buffer.lineCount();
     }
 
     /// Check if content is empty
     pub fn isEmpty(self: *const TextArea) bool {
-        return self.lines.items.len == 0 or
-            (self.lines.items.len == 1 and self.lines.items[0].items.len == 0);
+        return self.buffer.lineCount() == 0 or
+            (self.buffer.lineCount() == 1 and self.buffer.lineLen(0) == 0);
     }
 
     /// Clear all content
     pub fn clear(self: *TextArea) !void {
-        if (self.lines.items.len == 0) {
-            const empty: std.ArrayListUnmanaged(u8) = .empty;
-            try self.lines.append(self.allocator, empty);
-        } else {
-            self.lines.items[0].deinit(self.allocator);
-            self.lines.items[0] = .empty;
-            var i: usize = 1;
-            while (i < self.lines.items.len) : (i += 1) {
-                self.lines.items[i].deinit(self.allocator);
-            }
-            self.lines.shrinkRetainingCapacity(1);
-        }
+        try self.buffer.clear();
         self.cursor_line = 0;
         self.cursor_col = 0;
         self.scroll_y = 0;
@@ -203,19 +152,18 @@ pub const TextArea = struct {
     /// Kill text from cursor to end of line (Ctrl+K)
     pub fn killToEndOfLine(self: *TextArea) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
-        const line = &self.lines.items[self.cursor_line];
-        line.shrinkRetainingCapacity(self.cursor_col);
+        self.buffer.truncateLine(self.cursor_line, self.cursor_col) catch return;
         self.notifyChange();
     }
 
     /// Clear entire line content (Ctrl+U)
     pub fn clearLine(self: *TextArea) void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
-        self.lines.items[self.cursor_line].clearRetainingCapacity();
+        self.buffer.clearLine(self.cursor_line) catch return;
         self.cursor_col = 0;
         self.notifyChange();
     }
@@ -233,7 +181,7 @@ pub const TextArea = struct {
 
     /// Move cursor down
     pub fn cursorDown(self: *TextArea) void {
-        if (self.cursor_line + 1 < self.lines.items.len) {
+        if (self.cursor_line + 1 < self.buffer.lineCount()) {
             self.cursor_line += 1;
             self.clampCursorCol();
             self.ensureCursorVisible();
@@ -244,7 +192,7 @@ pub const TextArea = struct {
     pub fn cursorLeft(self: *TextArea) void {
         if (self.cursor_col > 0) {
             // Move back to start of previous UTF-8 codepoint
-            const line = self.lines.items[self.cursor_line].items;
+            const line = self.buffer.lineSlice(self.cursor_line);
             var i = self.cursor_col - 1;
             // Skip continuation bytes (10xxxxxx pattern)
             while (i > 0 and (line[i] & 0xC0) == 0x80) {
@@ -262,12 +210,12 @@ pub const TextArea = struct {
     pub fn cursorRight(self: *TextArea) void {
         const line_len = self.currentLineLen();
         if (self.cursor_col < line_len) {
-            const line = self.lines.items[self.cursor_line].items;
+            const line = self.buffer.lineSlice(self.cursor_line);
             // Decode codepoint length from lead byte and skip forward
             const lead = line[self.cursor_col];
             const cp_len = utf8CodepointLength(lead);
             self.cursor_col = @min(self.cursor_col + cp_len, line_len);
-        } else if (self.cursor_line + 1 < self.lines.items.len) {
+        } else if (self.cursor_line + 1 < self.buffer.lineCount()) {
             self.cursor_line += 1;
             self.cursor_col = 0;
         }
@@ -340,8 +288,8 @@ pub const TextArea = struct {
     }
 
     fn currentLineLen(self: *const TextArea) usize {
-        if (self.cursor_line < self.lines.items.len) {
-            return self.lines.items[self.cursor_line].items.len;
+        if (self.cursor_line < self.buffer.lineCount()) {
+            return self.buffer.lineLen(self.cursor_line);
         }
         return 0;
     }
@@ -354,8 +302,8 @@ pub const TextArea = struct {
             self.cursor_col = line_len;
         }
         // Ensure cursor is on a valid UTF-8 codepoint boundary
-        if (self.cursor_col > 0 and self.cursor_line < self.lines.items.len) {
-            const line = self.lines.items[self.cursor_line].items;
+        if (self.cursor_col > 0 and self.cursor_line < self.buffer.lineCount()) {
+            const line = self.buffer.lineSlice(self.cursor_line);
             self.cursor_col = findCodepointStart(line, self.cursor_col);
         }
     }
@@ -370,8 +318,8 @@ pub const TextArea = struct {
 
         // Horizontal scroll - work in display columns, then convert back to bytes
         const text_width = if (self.show_line_numbers) self.visible_width -| 5 else self.visible_width;
-        if (self.cursor_line >= self.lines.items.len) return;
-        const line = self.lines.items[self.cursor_line].items;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
+        const line = self.buffer.lineSlice(self.cursor_line);
 
         // Convert byte positions to display columns for comparison
         const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
@@ -393,9 +341,9 @@ pub const TextArea = struct {
     /// Insert single-byte character at cursor
     pub fn insertChar(self: *TextArea, char: u8) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
-        try self.lines.items[self.cursor_line].insert(self.allocator, self.cursor_col, char);
+        try self.buffer.insertByte(self.cursor_line, self.cursor_col, char);
         self.cursor_col += 1;
         self.ensureCursorVisible();
         self.notifyChange();
@@ -404,13 +352,11 @@ pub const TextArea = struct {
     /// Insert UTF-8 codepoint at cursor (supports multi-byte characters)
     pub fn insertCodepoint(self: *TextArea, codepoint: u21) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(codepoint, &buf) catch return;
-
-        const line = &self.lines.items[self.cursor_line];
-        try line.insertSlice(self.allocator, self.cursor_col, buf[0..len]);
+        try self.buffer.insertBytes(self.cursor_line, self.cursor_col, buf[0..len]);
         self.cursor_col += len;
         self.ensureCursorVisible();
         self.notifyChange();
@@ -419,7 +365,7 @@ pub const TextArea = struct {
     /// Insert a string at cursor position
     pub fn insertString(self: *TextArea, str: []const u8) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
         // Handle multi-line strings by splitting on newlines
         var iter = std.mem.splitScalar(u8, str, '\n');
@@ -430,8 +376,7 @@ pub const TextArea = struct {
             }
             first = false;
 
-            const line = &self.lines.items[self.cursor_line];
-            try line.insertSlice(self.allocator, self.cursor_col, segment);
+            try self.buffer.insertBytes(self.cursor_line, self.cursor_col, segment);
             self.cursor_col += segment.len;
         }
         self.ensureCursorVisible();
@@ -441,21 +386,8 @@ pub const TextArea = struct {
     /// Insert newline at cursor
     pub fn insertNewline(self: *TextArea) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
-
-        // Split current line at cursor
-        const current_line = &self.lines.items[self.cursor_line];
-        var new_line: std.ArrayListUnmanaged(u8) = .empty;
-        errdefer new_line.deinit(self.allocator);
-
-        // Move content after cursor to new line
-        if (self.cursor_col < current_line.items.len) {
-            try new_line.appendSlice(self.allocator, current_line.items[self.cursor_col..]);
-            current_line.shrinkRetainingCapacity(self.cursor_col);
-        }
-
-        // Insert new line after current
-        try self.lines.insert(self.allocator, self.cursor_line + 1, new_line);
+        if (self.cursor_line >= self.buffer.lineCount()) return;
+        try self.buffer.splitLine(self.cursor_line, self.cursor_col);
         self.cursor_line += 1;
         self.cursor_col = 0;
         self.ensureCursorVisible();
@@ -465,28 +397,22 @@ pub const TextArea = struct {
     /// Delete character before cursor (backspace) - UTF-8 aware
     pub fn deleteBack(self: *TextArea) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
         if (self.cursor_col > 0) {
-            const line = &self.lines.items[self.cursor_line];
+            const line = self.buffer.lineSlice(self.cursor_line);
             // Find start of previous codepoint
             var start = self.cursor_col - 1;
-            while (start > 0 and (line.items[start] & 0xC0) == 0x80) {
+            while (start > 0 and (line[start] & 0xC0) == 0x80) {
                 start -= 1;
             }
             // Remove all bytes of the codepoint
             const cp_len = self.cursor_col - start;
-            var i: usize = 0;
-            while (i < cp_len) : (i += 1) {
-                _ = line.orderedRemove(start);
-            }
+            try self.buffer.deleteRangeInLine(self.cursor_line, start, cp_len);
             self.cursor_col = start;
         } else if (self.cursor_line > 0) {
             // Merge with previous line
-            const prev_len = self.lines.items[self.cursor_line - 1].items.len;
-            try self.lines.items[self.cursor_line - 1].appendSlice(self.allocator, self.lines.items[self.cursor_line].items);
-            self.lines.items[self.cursor_line].deinit(self.allocator);
-            _ = self.lines.orderedRemove(self.cursor_line);
+            const prev_len = try self.buffer.mergeLineWithPrevious(self.cursor_line);
             self.cursor_line -= 1;
             self.cursor_col = prev_len;
         }
@@ -497,23 +423,20 @@ pub const TextArea = struct {
     /// Delete character at cursor (forward delete) - UTF-8 aware
     pub fn deleteForward(self: *TextArea) !void {
         if (self.read_only) return;
-        if (self.cursor_line >= self.lines.items.len) return;
+        if (self.cursor_line >= self.buffer.lineCount()) return;
 
-        const line = &self.lines.items[self.cursor_line];
-        if (self.cursor_col < line.items.len) {
+        const line = self.buffer.lineSlice(self.cursor_line);
+        if (self.cursor_col < line.len) {
             // Get length of codepoint at cursor
-            const lead = line.items[self.cursor_col];
+            const lead = line[self.cursor_col];
             const cp_len = utf8CodepointLength(lead);
             // Remove all bytes of the codepoint
-            var i: usize = 0;
-            while (i < cp_len and self.cursor_col < line.items.len) : (i += 1) {
-                _ = line.orderedRemove(self.cursor_col);
+            if (self.cursor_col < line.len) {
+                try self.buffer.deleteRangeInLine(self.cursor_line, self.cursor_col, cp_len);
             }
-        } else if (self.cursor_line + 1 < self.lines.items.len) {
+        } else if (self.cursor_line + 1 < self.buffer.lineCount()) {
             // Merge with next line
-            try line.appendSlice(self.allocator, self.lines.items[self.cursor_line + 1].items);
-            self.lines.items[self.cursor_line + 1].deinit(self.allocator);
-            _ = self.lines.orderedRemove(self.cursor_line + 1);
+            try self.buffer.mergeLineWithNext(self.cursor_line);
         }
         self.notifyChange();
     }
@@ -560,15 +483,15 @@ pub const TextArea = struct {
             }
 
             // Draw line number
-            if (self.show_line_numbers and line_idx < self.lines.items.len) {
+            if (self.show_line_numbers and line_idx < self.buffer.lineCount()) {
                 var num_buf: [8]u8 = undefined;
                 const num_str = std.fmt.bufPrint(&num_buf, "{d:>4} ", .{line_idx + 1}) catch "???? ";
                 view.print(0, @intCast(y), num_str, self.line_number_style.fg, self.line_number_style.bg, .{});
             }
 
             // Draw line content
-            if (line_idx < self.lines.items.len) {
-                const line = self.lines.items[line_idx].items;
+            if (line_idx < self.buffer.lineCount()) {
+                const line = self.buffer.lineSlice(line_idx);
                 // scroll_x is always on a valid codepoint boundary (enforced by ensureCursorVisible)
                 const start_byte = @min(self.scroll_x, line.len);
 
