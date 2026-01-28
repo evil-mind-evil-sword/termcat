@@ -13,6 +13,16 @@ const TextBuffer = @import("../text/TextBuffer.zig").TextBuffer;
 
 /// TextArea widget for multi-line editing
 pub const TextArea = struct {
+    pub const Position = struct {
+        line: usize,
+        col: usize,
+    };
+
+    pub const Selection = struct {
+        start: Position,
+        end: Position,
+    };
+
     /// Text content buffer
     buffer: TextBuffer,
     /// Allocator for dynamic content
@@ -32,6 +42,8 @@ pub const TextArea = struct {
     style: Style = .{},
     /// Cursor style
     cursor_style: Style = .{ .attrs = .{ .reverse = true } },
+    /// Selection style
+    selection_style: Style = .{ .attrs = .{ .reverse = true } },
     /// Line number style
     line_number_style: Style = .{ .fg = .{ .index = 8 } },
     /// Widget state
@@ -42,6 +54,10 @@ pub const TextArea = struct {
     on_change: ?*const fn (ctx: ?*anyopaque) void = null,
     /// Callback context
     callback_ctx: ?*anyopaque = null,
+    /// Selection anchor (start of selection)
+    selection_anchor: ?Position = null,
+    /// Normalized selection range (start <= end). Null when no selection.
+    selection: ?Selection = null,
 
     /// Create an empty text area
     pub fn init(allocator: std.mem.Allocator) !TextArea {
@@ -92,6 +108,12 @@ pub const TextArea = struct {
         return self;
     }
 
+    /// Set selection style
+    pub fn withSelectionStyle(self: *TextArea, style: Style) *TextArea {
+        self.selection_style = style;
+        return self;
+    }
+
     /// Set change callback
     pub fn withOnChange(self: *TextArea, callback: *const fn (ctx: ?*anyopaque) void, ctx: ?*anyopaque) *TextArea {
         self.on_change = callback;
@@ -111,6 +133,7 @@ pub const TextArea = struct {
         self.cursor_col = 0;
         self.scroll_y = 0;
         self.scroll_x = 0;
+        self.clearSelection();
     }
 
     /// Get text content
@@ -146,6 +169,7 @@ pub const TextArea = struct {
         self.cursor_col = 0;
         self.scroll_y = 0;
         self.scroll_x = 0;
+        self.clearSelection();
         self.notifyChange();
     }
 
@@ -154,6 +178,10 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        if (try self.deleteSelection()) {
+            self.notifyChange();
+            return;
+        }
         self.buffer.truncateLine(self.cursor_line, self.cursor_col) catch return;
         self.notifyChange();
     }
@@ -163,6 +191,10 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        if (self.deleteSelection() catch false) {
+            self.notifyChange();
+            return;
+        }
         self.buffer.clearLine(self.cursor_line) catch return;
         self.cursor_col = 0;
         self.notifyChange();
@@ -336,6 +368,80 @@ pub const TextArea = struct {
         }
     }
 
+    fn positionLess(a: Position, b: Position) bool {
+        if (a.line < b.line) return true;
+        if (a.line > b.line) return false;
+        return a.col < b.col;
+    }
+
+    fn positionEqual(a: Position, b: Position) bool {
+        return a.line == b.line and a.col == b.col;
+    }
+
+    fn normalizeSelection(anchor: Position, focus: Position) Selection {
+        if (positionLess(focus, anchor)) {
+            return .{ .start = focus, .end = anchor };
+        }
+        return .{ .start = anchor, .end = focus };
+    }
+
+    pub fn selectionRange(self: *const TextArea) ?Selection {
+        return self.selection;
+    }
+
+    pub fn hasSelection(self: *const TextArea) bool {
+        return self.selection != null;
+    }
+
+    pub fn clearSelection(self: *TextArea) void {
+        self.selection_anchor = null;
+        self.selection = null;
+    }
+
+    fn startSelection(self: *TextArea) void {
+        if (self.selection_anchor == null) {
+            self.selection_anchor = .{
+                .line = self.cursor_line,
+                .col = self.cursor_col,
+            };
+        }
+    }
+
+    fn updateSelectionToCursor(self: *TextArea) void {
+        const anchor = self.selection_anchor orelse return;
+        const focus = Position{ .line = self.cursor_line, .col = self.cursor_col };
+        if (positionEqual(anchor, focus)) {
+            self.selection = null;
+            return;
+        }
+        self.selection = normalizeSelection(anchor, focus);
+    }
+
+    fn selectionSpanForLine(self: *const TextArea, line_idx: usize) ?struct { start_col: usize, end_col: usize } {
+        const sel = self.selection orelse return null;
+        if (line_idx < sel.start.line or line_idx > sel.end.line) return null;
+        if (sel.start.line == sel.end.line) {
+            return .{ .start_col = sel.start.col, .end_col = sel.end.col };
+        }
+        if (line_idx == sel.start.line) {
+            return .{ .start_col = sel.start.col, .end_col = self.buffer.lineLen(line_idx) };
+        }
+        if (line_idx == sel.end.line) {
+            return .{ .start_col = 0, .end_col = sel.end.col };
+        }
+        return .{ .start_col = 0, .end_col = self.buffer.lineLen(line_idx) };
+    }
+
+    fn deleteSelection(self: *TextArea) !bool {
+        const sel = self.selection orelse return false;
+        try self.buffer.deleteRange(sel.start.line, sel.start.col, sel.end.line, sel.end.col);
+        self.cursor_line = sel.start.line;
+        self.cursor_col = sel.start.col;
+        self.clearSelection();
+        self.ensureCursorVisible();
+        return true;
+    }
+
     // Editing methods
 
     /// Insert single-byte character at cursor
@@ -343,6 +449,7 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        _ = try self.deleteSelection();
         try self.buffer.insertByte(self.cursor_line, self.cursor_col, char);
         self.cursor_col += 1;
         self.ensureCursorVisible();
@@ -354,6 +461,7 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        _ = try self.deleteSelection();
         var buf: [4]u8 = undefined;
         const len = std.unicode.utf8Encode(codepoint, &buf) catch return;
         try self.buffer.insertBytes(self.cursor_line, self.cursor_col, buf[0..len]);
@@ -367,6 +475,7 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        _ = try self.deleteSelection();
         // Handle multi-line strings by splitting on newlines
         var iter = std.mem.splitScalar(u8, str, '\n');
         var first = true;
@@ -387,6 +496,7 @@ pub const TextArea = struct {
     pub fn insertNewline(self: *TextArea) !void {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
+        _ = try self.deleteSelection();
         try self.buffer.splitLine(self.cursor_line, self.cursor_col);
         self.cursor_line += 1;
         self.cursor_col = 0;
@@ -399,6 +509,10 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        if (try self.deleteSelection()) {
+            self.notifyChange();
+            return;
+        }
         if (self.cursor_col > 0) {
             const line = self.buffer.lineSlice(self.cursor_line);
             // Find start of previous codepoint
@@ -425,6 +539,10 @@ pub const TextArea = struct {
         if (self.read_only) return;
         if (self.cursor_line >= self.buffer.lineCount()) return;
 
+        if (try self.deleteSelection()) {
+            self.notifyChange();
+            return;
+        }
         const line = self.buffer.lineSlice(self.cursor_line);
         if (self.cursor_col < line.len) {
             // Get length of codepoint at cursor
@@ -500,6 +618,27 @@ pub const TextArea = struct {
                     view.print(@intCast(text_start_x), @intCast(y), line[start_byte..], self.style.fg, self.style.bg, self.style.attrs);
                 }
 
+                // Draw selection highlight
+                if (self.selectionSpanForLine(line_idx)) |span| {
+                    const line_len = line.len;
+                    const sel_start = @min(span.start_col, line_len);
+                    const sel_end = @min(span.end_col, line_len);
+                    if (sel_end > sel_start) {
+                        const scroll_byte = @min(self.scroll_x, line_len);
+                        if (sel_end > scroll_byte) {
+                            const visible_start = @max(sel_start, scroll_byte);
+                            if (visible_start < sel_end) {
+                                const sel_x = text_start_x +
+                                    displayWidthUpTo(line, visible_start) -|
+                                    displayWidthUpTo(line, scroll_byte);
+                                if (sel_x < size.width) {
+                                    view.print(@intCast(sel_x), @intCast(y), line[visible_start..sel_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Draw cursor
                 if (self.widget_state.focused and line_idx == self.cursor_line) {
                     // Calculate display width up to cursor position (not byte offset)
@@ -533,22 +672,64 @@ pub const TextArea = struct {
             .key => |key| {
                 // Navigation
                 if (key.special == .up) {
-                    self.cursorUp();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorUp();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorUp();
+                    }
                     return .consumed;
                 } else if (key.special == .down) {
-                    self.cursorDown();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorDown();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorDown();
+                    }
                     return .consumed;
                 } else if (key.special == .left) {
-                    self.cursorLeft();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorLeft();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorLeft();
+                    }
                     return .consumed;
                 } else if (key.special == .right) {
-                    self.cursorRight();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorRight();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorRight();
+                    }
                     return .consumed;
                 } else if (key.special == .home) {
-                    self.cursorHome();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorHome();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorHome();
+                    }
                     return .consumed;
                 } else if (key.special == .end) {
-                    self.cursorEnd();
+                    if (key.mods.shift) {
+                        self.startSelection();
+                        self.cursorEnd();
+                        self.updateSelectionToCursor();
+                    } else {
+                        self.clearSelection();
+                        self.cursorEnd();
+                    }
                     return .consumed;
                 }
                 // Editing
@@ -704,6 +885,50 @@ test "TextArea render" {
 
     try std.testing.expectEqual(@as(u21, 'H'), view.getCell(0, 0).?.char);
     try std.testing.expectEqual(@as(u21, 'e'), view.getCell(1, 0).?.char);
+}
+
+test "TextArea selection render" {
+    const allocator = std.testing.allocator;
+    const root = try Plane.initRoot(allocator, .{ .width = 10, .height = 2 });
+    defer root.deinit();
+
+    var ta = try TextArea.init(allocator);
+    defer ta.deinit();
+    try ta.setText("Hello");
+    ta.cursor_line = 0;
+    ta.cursor_col = 1;
+    ta.startSelection();
+    ta.cursorRight();
+    ta.cursorRight();
+    ta.updateSelectionToCursor();
+    ta.widget_state.focused = false;
+
+    const widget = Widget.Widget.init(TextArea, &ta);
+    var view = PlaneView.init(root);
+    widget.render(&view);
+
+    try std.testing.expect(view.getCell(1, 0).?.attrs.reverse);
+    try std.testing.expect(view.getCell(2, 0).?.attrs.reverse);
+    try std.testing.expect(!view.getCell(0, 0).?.attrs.reverse);
+}
+
+test "TextArea delete selection" {
+    var ta = try TextArea.init(std.testing.allocator);
+    defer ta.deinit();
+
+    try ta.setText("Hello\nWorld");
+    ta.cursor_line = 0;
+    ta.cursor_col = 1;
+    ta.startSelection();
+    ta.cursorRight();
+    ta.cursorRight();
+    ta.updateSelectionToCursor();
+
+    try ta.deleteForward();
+
+    const text = try ta.getText(std.testing.allocator);
+    defer std.testing.allocator.free(text);
+    try std.testing.expectEqualStrings("Hlo\nWorld", text);
 }
 
 test "TextArea insertCodepoint" {

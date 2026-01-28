@@ -145,6 +145,33 @@ pub const TextBuffer = struct {
         }
     }
 
+    /// Delete a range that may span multiple lines.
+    /// Start is inclusive, end is exclusive. Positions are byte offsets.
+    pub fn deleteRange(self: *TextBuffer, start_line: usize, start_col: usize, end_line: usize, end_col: usize) Error!void {
+        if (start_line >= self.lines.items.len or end_line >= self.lines.items.len) return error.OutOfRange;
+        if (start_line > end_line) return error.OutOfRange;
+        if (start_line == end_line) {
+            if (end_col <= start_col) return;
+            return self.deleteRangeInLine(start_line, start_col, end_col - start_col);
+        }
+
+        const start_line_ptr = &self.lines.items[start_line];
+        const end_line_ptr = &self.lines.items[end_line];
+
+        const start_clamped = @min(start_col, start_line_ptr.items.len);
+        const end_clamped = @min(end_col, end_line_ptr.items.len);
+
+        start_line_ptr.shrinkRetainingCapacity(start_clamped);
+        if (end_clamped < end_line_ptr.items.len) {
+            try start_line_ptr.appendSlice(self.allocator, end_line_ptr.items[end_clamped..]);
+        }
+
+        var idx = end_line;
+        while (idx > start_line) : (idx -= 1) {
+            self.removeLine(idx);
+        }
+    }
+
     pub fn truncateLine(self: *TextBuffer, line_idx: usize, len: usize) Error!void {
         if (line_idx >= self.lines.items.len) return error.OutOfRange;
         const line = &self.lines.items[line_idx];
@@ -166,6 +193,12 @@ pub const TextBuffer = struct {
             line.deinit(self.allocator);
         }
         self.lines.clearRetainingCapacity();
+    }
+
+    fn removeLine(self: *TextBuffer, line_idx: usize) void {
+        if (line_idx >= self.lines.items.len) return;
+        self.lines.items[line_idx].deinit(self.allocator);
+        _ = self.lines.orderedRemove(line_idx);
     }
 };
 
@@ -211,4 +244,15 @@ test "TextBuffer merge and delete" {
 
     try buffer.deleteRangeInLine(0, 1, 2);
     try std.testing.expectEqualStrings("ad", buffer.lineSlice(0));
+}
+
+test "TextBuffer deleteRange across lines" {
+    var buffer = try TextBuffer.init(std.testing.allocator);
+    defer buffer.deinit();
+
+    try buffer.setText("ab\ncd\nef");
+    try buffer.deleteRange(0, 1, 2, 1);
+
+    try std.testing.expectEqual(@as(usize, 1), buffer.lineCount());
+    try std.testing.expectEqualStrings("af", buffer.lineSlice(0));
 }
