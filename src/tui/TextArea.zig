@@ -10,6 +10,7 @@ const Cell = @import("../Cell.zig");
 const Event = @import("../Event.zig");
 const unicode = @import("../unicode/width.zig");
 const TextBuffer = @import("../text/TextBuffer.zig").TextBuffer;
+const text_utf8 = @import("../text/utf8.zig");
 const syntax = @import("../syntax/root.zig");
 
 /// TextArea widget for multi-line editing
@@ -337,14 +338,8 @@ pub const TextArea = struct {
     /// Move cursor left (UTF-8 aware)
     pub fn cursorLeft(self: *TextArea) void {
         if (self.cursor_col > 0) {
-            // Move back to start of previous UTF-8 codepoint
             const line = self.buffer.lineSlice(self.cursor_line);
-            var i = self.cursor_col - 1;
-            // Skip continuation bytes (10xxxxxx pattern)
-            while (i > 0 and (line[i] & 0xC0) == 0x80) {
-                i -= 1;
-            }
-            self.cursor_col = i;
+            self.cursor_col = text_utf8.prevCharBoundary(line, self.cursor_col);
         } else if (self.cursor_line > 0) {
             self.cursor_line -= 1;
             self.cursor_col = self.currentLineLen();
@@ -359,73 +354,13 @@ pub const TextArea = struct {
             const line = self.buffer.lineSlice(self.cursor_line);
             // Decode codepoint length from lead byte and skip forward
             const lead = line[self.cursor_col];
-            const cp_len = utf8CodepointLength(lead);
+            const cp_len = text_utf8.codepointLength(lead);
             self.cursor_col = @min(self.cursor_col + cp_len, line_len);
         } else if (self.cursor_line + 1 < self.buffer.lineCount()) {
             self.cursor_line += 1;
             self.cursor_col = 0;
         }
         self.ensureCursorVisible();
-    }
-
-    /// Get the length of a UTF-8 codepoint from its lead byte
-    fn utf8CodepointLength(lead: u8) usize {
-        if (lead < 0x80) return 1; // ASCII
-        if (lead & 0xE0 == 0xC0) return 2; // 110xxxxx
-        if (lead & 0xF0 == 0xE0) return 3; // 1110xxxx
-        if (lead & 0xF8 == 0xF0) return 4; // 11110xxx
-        return 1; // Invalid, treat as single byte
-    }
-
-    /// Find the start of the UTF-8 codepoint at or before the given byte position
-    fn findCodepointStart(line: []const u8, pos: usize) usize {
-        if (pos == 0) return 0;
-        // End of line is always a valid codepoint boundary
-        if (pos >= line.len) return line.len;
-        var i = pos;
-        // If we're in the middle of a codepoint, back up to its start
-        while (i > 0 and (line[i] & 0xC0) == 0x80) {
-            i -= 1;
-        }
-        return i;
-    }
-
-    /// Calculate display width (columns) for text up to a byte position
-    fn displayWidthUpTo(text: []const u8, byte_pos: usize) u16 {
-        const slice = text[0..@min(byte_pos, text.len)];
-        return @intCast(@min(unicode.stringWidth(slice), std.math.maxInt(u16)));
-    }
-
-    fn displayWidthBetween(text: []const u8, start: usize, end: usize) u16 {
-        const clamped_start = @min(start, text.len);
-        const clamped_end = @min(end, text.len);
-        if (clamped_end <= clamped_start) return 0;
-        return @intCast(@min(unicode.stringWidth(text[clamped_start..clamped_end]), std.math.maxInt(u16)));
-    }
-
-    /// Find byte position for a target display column.
-    /// Returns the byte index where display width reaches or exceeds target_col.
-    /// Always returns a valid codepoint boundary.
-    fn byteIndexForDisplayColumn(text: []const u8, target_col: usize) usize {
-        if (target_col == 0) return 0;
-        var byte_pos: usize = 0;
-        var display_col: usize = 0;
-        var iter = std.unicode.Utf8View.initUnchecked(text).iterator();
-        while (iter.nextCodepoint()) |cp| {
-            if (display_col >= target_col) break;
-            const cp_width = unicode.codePointWidth(cp);
-            display_col += cp_width;
-            byte_pos = iter.i;
-        }
-        return byte_pos;
-    }
-
-    /// Decode a UTF-8 codepoint at the given byte position
-    fn decodeCodepointAt(line: []const u8, pos: usize) u21 {
-        if (pos >= line.len) return ' ';
-        const len = std.unicode.utf8ByteSequenceLength(line[pos]) catch return line[pos];
-        if (pos + len > line.len) return line[pos];
-        return std.unicode.utf8Decode(line[pos..][0..len]) catch line[pos];
     }
 
     fn wrapWidth(self: *const TextArea) u16 {
@@ -530,7 +465,7 @@ pub const TextArea = struct {
         // Ensure cursor is on a valid UTF-8 codepoint boundary
         if (self.cursor_col > 0 and self.cursor_line < self.buffer.lineCount()) {
             const line = self.buffer.lineSlice(self.cursor_line);
-            self.cursor_col = findCodepointStart(line, self.cursor_col);
+            self.cursor_col = text_utf8.findCodepointStart(line, self.cursor_col);
         }
     }
 
@@ -600,7 +535,7 @@ pub const TextArea = struct {
         if (!self.wrapEnabled()) {
             return .{
                 .index = self.cursor_line,
-                .column = displayWidthUpTo(line, self.cursor_col),
+                .column = text_utf8.displayWidthUpTo(line, self.cursor_col),
             };
         }
 
@@ -625,7 +560,7 @@ pub const TextArea = struct {
                 const col_in_segment = self.cursor_col - segment.start;
                 return .{
                     .index = index,
-                    .column = displayWidthUpTo(segment_slice, col_in_segment),
+                    .column = text_utf8.displayWidthUpTo(segment_slice, col_in_segment),
                 };
             }
             index += 1;
@@ -633,7 +568,7 @@ pub const TextArea = struct {
 
         return .{
             .index = index,
-            .column = displayWidthUpTo(line, self.cursor_col),
+            .column = text_utf8.displayWidthUpTo(line, self.cursor_col),
         };
     }
 
@@ -641,7 +576,7 @@ pub const TextArea = struct {
         self.cursor_line = line_idx;
         const line = self.buffer.lineSlice(line_idx);
         const segment_slice = line[segment_start..segment_end];
-        const offset = byteIndexForDisplayColumn(segment_slice, desired_col);
+        const offset = text_utf8.byteIndexForDisplayColumn(segment_slice, desired_col);
         self.cursor_col = segment_start + offset;
         self.clampCursorCol();
         self.ensureCursorVisible();
@@ -662,8 +597,8 @@ pub const TextArea = struct {
             const line = self.buffer.lineSlice(self.cursor_line);
 
             // Convert byte positions to display columns for comparison
-            const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
-            const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
+            const cursor_display_col = text_utf8.displayWidthUpTo(line, self.cursor_col);
+            const scroll_display_col = text_utf8.displayWidthUpTo(line, self.scroll_x);
 
             if (cursor_display_col < scroll_display_col) {
                 // Cursor is left of visible area - scroll left to cursor
@@ -672,7 +607,7 @@ pub const TextArea = struct {
                 // Cursor is right of visible area - scroll right
                 // Find the byte position where display width reaches (cursor_display_col - text_width + 1)
                 const target_scroll_col = cursor_display_col - text_width + 1;
-                self.scroll_x = byteIndexForDisplayColumn(line, target_scroll_col);
+                self.scroll_x = text_utf8.byteIndexForDisplayColumn(line, target_scroll_col);
             }
             return;
         }
@@ -865,7 +800,7 @@ pub const TextArea = struct {
         if (self.cursor_col < line.len) {
             // Get length of codepoint at cursor
             const lead = line[self.cursor_col];
-            const cp_len = utf8CodepointLength(lead);
+            const cp_len = text_utf8.codepointLength(lead);
             // Remove all bytes of the codepoint
             if (self.cursor_col < line.len) {
                 try self.buffer.deleteRangeInLine(self.cursor_line, self.cursor_col, cp_len);
@@ -966,7 +901,7 @@ pub const TextArea = struct {
             const span_end = span_end_abs - line_start;
 
             if (span_start > cursor) {
-                const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, span_start)));
+                const x = base_x + @as(u16, @intCast(text_utf8.displayWidthBetween(line, seg_start, span_start)));
                 view.print(@intCast(x), @intCast(y), line[cursor..span_start], base_style.fg, base_style.bg, base_style.attrs);
             }
 
@@ -974,13 +909,13 @@ pub const TextArea = struct {
             if (self.syntax_style.?.resolveById(span.style_id)) |def| {
                 styled = syntax.SyntaxStyle.applyDefinition(def, base_style);
             }
-            const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, span_start)));
+            const x = base_x + @as(u16, @intCast(text_utf8.displayWidthBetween(line, seg_start, span_start)));
             view.print(@intCast(x), @intCast(y), line[span_start..span_end], styled.fg, styled.bg, styled.attrs);
             cursor = span_end;
         }
 
         if (cursor < seg_end) {
-            const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, cursor)));
+            const x = base_x + @as(u16, @intCast(text_utf8.displayWidthBetween(line, seg_start, cursor)));
             view.print(@intCast(x), @intCast(y), line[cursor..seg_end], base_style.fg, base_style.bg, base_style.attrs);
         }
     }
@@ -1059,8 +994,8 @@ pub const TextArea = struct {
                                 const visible_start = @max(sel_start, scroll_byte);
                                 if (visible_start < sel_end) {
                                     const sel_x = text_start_x +
-                                        displayWidthUpTo(line, visible_start) -|
-                                        displayWidthUpTo(line, scroll_byte);
+                                        text_utf8.displayWidthUpTo(line, visible_start) -|
+                                        text_utf8.displayWidthUpTo(line, scroll_byte);
                                     if (sel_x < size.width) {
                                         view.print(@intCast(sel_x), @intCast(y), line[visible_start..sel_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
                                     }
@@ -1072,12 +1007,12 @@ pub const TextArea = struct {
                     // Draw cursor
                     if (self.widget_state.focused and line_idx == self.cursor_line) {
                         // Calculate display width up to cursor position (not byte offset)
-                        const cursor_display_col = displayWidthUpTo(line, self.cursor_col);
-                        const scroll_display_col = displayWidthUpTo(line, self.scroll_x);
+                        const cursor_display_col = text_utf8.displayWidthUpTo(line, self.cursor_col);
+                        const scroll_display_col = text_utf8.displayWidthUpTo(line, self.scroll_x);
                         const cursor_x = text_start_x + cursor_display_col -| scroll_display_col;
                         if (cursor_x < size.width) {
                             // Decode the actual codepoint at cursor position
-                            const cursor_char: u21 = decodeCodepointAt(line, self.cursor_col);
+                            const cursor_char: u21 = text_utf8.decodeCodepointAt(line, self.cursor_col);
                             view.setCell(@intCast(cursor_x), @intCast(y), .{
                                 .char = cursor_char,
                                 .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -1145,7 +1080,7 @@ pub const TextArea = struct {
                 const visible_start = @max(sel_start, seg_start);
                 const visible_end = @min(sel_end, seg_end);
                 if (visible_end > visible_start) {
-                    const sel_x = text_start_x + displayWidthBetween(line, seg_start, visible_start);
+                    const sel_x = text_start_x + text_utf8.displayWidthBetween(line, seg_start, visible_start);
                     if (sel_x < size.width) {
                         view.print(@intCast(sel_x), @intCast(y), line[visible_start..visible_end], self.selection_style.fg, self.selection_style.bg, self.selection_style.attrs);
                     }
@@ -1157,9 +1092,9 @@ pub const TextArea = struct {
                 const line_len = line.len;
                 const in_segment = self.cursor_col < visual.end or (visual.end == line_len and self.cursor_col == visual.end);
                 if (self.cursor_col >= visual.start and in_segment) {
-                    const cursor_x = text_start_x + displayWidthBetween(line, visual.start, self.cursor_col);
+                    const cursor_x = text_start_x + text_utf8.displayWidthBetween(line, visual.start, self.cursor_col);
                     if (cursor_x < size.width) {
-                        const cursor_char: u21 = decodeCodepointAt(line, self.cursor_col);
+                        const cursor_char: u21 = text_utf8.decodeCodepointAt(line, self.cursor_col);
                         view.setCell(@intCast(cursor_x), @intCast(y), .{
                             .char = cursor_char,
                             .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -1700,16 +1635,16 @@ test "TextArea displayWidthUpTo for cursor rendering" {
     const text = "A中B";
 
     // At position 0 (before 'A'), display width = 0
-    try std.testing.expectEqual(@as(u16, 0), TextArea.displayWidthUpTo(text, 0));
+    try std.testing.expectEqual(@as(u16, 0), text_utf8.displayWidthUpTo(text, 0));
 
     // At position 1 (after 'A'), display width = 1
-    try std.testing.expectEqual(@as(u16, 1), TextArea.displayWidthUpTo(text, 1));
+    try std.testing.expectEqual(@as(u16, 1), text_utf8.displayWidthUpTo(text, 1));
 
     // At position 4 (after '中'), display width = 3 (A=1 + 中=2)
-    try std.testing.expectEqual(@as(u16, 3), TextArea.displayWidthUpTo(text, 4));
+    try std.testing.expectEqual(@as(u16, 3), text_utf8.displayWidthUpTo(text, 4));
 
     // At position 5 (after 'B'), display width = 4 (A=1 + 中=2 + B=1)
-    try std.testing.expectEqual(@as(u16, 4), TextArea.displayWidthUpTo(text, 5));
+    try std.testing.expectEqual(@as(u16, 4), text_utf8.displayWidthUpTo(text, 5));
 }
 
 test "TextArea decodeCodepointAt" {
@@ -1717,16 +1652,16 @@ test "TextArea decodeCodepointAt" {
     const text = "A中B";
 
     // ASCII 'A' at position 0
-    try std.testing.expectEqual(@as(u21, 'A'), TextArea.decodeCodepointAt(text, 0));
+    try std.testing.expectEqual(@as(u21, 'A'), text_utf8.decodeCodepointAt(text, 0));
 
     // CJK '中' at position 1
-    try std.testing.expectEqual(@as(u21, '中'), TextArea.decodeCodepointAt(text, 1));
+    try std.testing.expectEqual(@as(u21, '中'), text_utf8.decodeCodepointAt(text, 1));
 
     // ASCII 'B' at position 4
-    try std.testing.expectEqual(@as(u21, 'B'), TextArea.decodeCodepointAt(text, 4));
+    try std.testing.expectEqual(@as(u21, 'B'), text_utf8.decodeCodepointAt(text, 4));
 
     // End of text returns space
-    try std.testing.expectEqual(@as(u21, ' '), TextArea.decodeCodepointAt(text, 5));
+    try std.testing.expectEqual(@as(u21, ' '), text_utf8.decodeCodepointAt(text, 5));
 }
 
 test "TextArea byteIndexForDisplayColumn" {
@@ -1735,18 +1670,18 @@ test "TextArea byteIndexForDisplayColumn" {
     const text = "A中B";
 
     // Display column 0 -> byte 0
-    try std.testing.expectEqual(@as(usize, 0), TextArea.byteIndexForDisplayColumn(text, 0));
+    try std.testing.expectEqual(@as(usize, 0), text_utf8.byteIndexForDisplayColumn(text, 0));
 
     // Display column 1 -> byte 1 (after 'A')
-    try std.testing.expectEqual(@as(usize, 1), TextArea.byteIndexForDisplayColumn(text, 1));
+    try std.testing.expectEqual(@as(usize, 1), text_utf8.byteIndexForDisplayColumn(text, 1));
 
     // Display column 2 -> byte 4 (in middle of '中', so after '中')
     // Note: CJK '中' is 2 columns wide, so col 2 is still inside it
-    try std.testing.expectEqual(@as(usize, 4), TextArea.byteIndexForDisplayColumn(text, 2));
+    try std.testing.expectEqual(@as(usize, 4), text_utf8.byteIndexForDisplayColumn(text, 2));
 
     // Display column 3 -> byte 4 (after '中')
-    try std.testing.expectEqual(@as(usize, 4), TextArea.byteIndexForDisplayColumn(text, 3));
+    try std.testing.expectEqual(@as(usize, 4), text_utf8.byteIndexForDisplayColumn(text, 3));
 
     // Display column 4 -> byte 5 (after 'B', end of text)
-    try std.testing.expectEqual(@as(usize, 5), TextArea.byteIndexForDisplayColumn(text, 4));
+    try std.testing.expectEqual(@as(usize, 5), text_utf8.byteIndexForDisplayColumn(text, 4));
 }

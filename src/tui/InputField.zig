@@ -29,6 +29,7 @@ const Style = @import("Theme.zig").Style;
 const Cell = @import("../Cell.zig");
 const Event = @import("../Event.zig");
 const unicode = @import("../unicode/width.zig");
+const text_utf8 = @import("../text/utf8.zig");
 
 /// Edit action type for on_edit callback
 pub const EditAction = union(enum) {
@@ -122,50 +123,6 @@ pub const InputField = struct {
         return self;
     }
 
-    /// Get the display width of text up to a byte position
-    fn displayWidthUpTo(text: []const u8, byte_pos: usize) u16 {
-        const slice = text[0..@min(byte_pos, text.len)];
-        return @intCast(@min(unicode.stringWidth(slice), std.math.maxInt(u16)));
-    }
-
-    /// Get byte position from display column.
-    /// Returns 0 if text is invalid UTF-8.
-    fn bytePositionFromColumn(text: []const u8, target_col: u16) usize {
-        var col: u16 = 0;
-        var byte_pos: usize = 0;
-        const view = std.unicode.Utf8View.init(text) catch return 0;
-        var iter = view.iterator();
-        while (iter.nextCodepoint()) |cp| {
-            if (col >= target_col) break;
-            const char_width: u16 = @intCast(unicode.codePointWidth(cp));
-            col += char_width;
-            byte_pos = iter.i;
-        }
-        return byte_pos;
-    }
-
-    /// Find the start of the previous character (for cursor left)
-    fn prevCharBoundary(text: []const u8, pos: usize) usize {
-        if (pos == 0) return 0;
-        var i = pos - 1;
-        // Walk back through UTF-8 continuation bytes
-        while (i > 0 and (text[i] & 0xC0) == 0x80) {
-            i -= 1;
-        }
-        return i;
-    }
-
-    /// Find the start of the next character (for cursor right)
-    fn nextCharBoundary(text: []const u8, pos: usize) usize {
-        if (pos >= text.len) return text.len;
-        var i = pos + 1;
-        // Walk forward through UTF-8 continuation bytes
-        while (i < text.len and (text[i] & 0xC0) == 0x80) {
-            i += 1;
-        }
-        return i;
-    }
-
     /// Measure the input field's preferred size
     fn measure(ptr: *anyopaque, constraint: Widget.SizeConstraint) Widget.MeasuredSize {
         const self: *InputField = @ptrCast(@alignCast(ptr));
@@ -202,7 +159,7 @@ pub const InputField = struct {
         }
 
         // Calculate cursor display position
-        const cursor_col = displayWidthUpTo(self.text, self.cursor);
+        const cursor_col = text_utf8.displayWidthUpTo(self.text, self.cursor);
 
         // Adjust scroll to keep cursor visible and persist the change
         if (cursor_col < self.scroll_offset) {
@@ -300,7 +257,7 @@ pub const InputField = struct {
                     switch (special) {
                         .left => {
                             if (self.cursor > 0) {
-                                const new_cursor = prevCharBoundary(self.text, self.cursor);
+                                const new_cursor = text_utf8.prevCharBoundary(self.text, self.cursor);
                                 self.cursor = new_cursor;
                                 if (self.on_edit) |callback| {
                                     callback(self.callback_ctx, .{ .cursor_move = self.cursor });
@@ -310,7 +267,7 @@ pub const InputField = struct {
                         },
                         .right => {
                             if (self.cursor < self.text.len) {
-                                const new_cursor = nextCharBoundary(self.text, self.cursor);
+                                const new_cursor = text_utf8.nextCharBoundary(self.text, self.cursor);
                                 self.cursor = new_cursor;
                                 if (self.on_edit) |callback| {
                                     callback(self.callback_ctx, .{ .cursor_move = self.cursor });
@@ -340,7 +297,7 @@ pub const InputField = struct {
                         },
                         .backspace => {
                             if (self.cursor > 0) {
-                                const prev = prevCharBoundary(self.text, self.cursor);
+                                const prev = text_utf8.prevCharBoundary(self.text, self.cursor);
                                 if (self.on_edit) |callback| {
                                     callback(self.callback_ctx, .{ .delete_before = self.cursor });
                                 }
@@ -428,38 +385,38 @@ test "InputField measure" {
 }
 
 test "InputField displayWidthUpTo ASCII" {
-    const width = InputField.displayWidthUpTo("Hello", 3);
+    const width = text_utf8.displayWidthUpTo("Hello", 3);
     try std.testing.expectEqual(@as(u16, 3), width);
 }
 
 test "InputField displayWidthUpTo UTF-8" {
     // "中文" = 2 chars, each width 2
-    const width = InputField.displayWidthUpTo("中文", 6); // 6 bytes for 2 chars
+    const width = text_utf8.displayWidthUpTo("中文", 6); // 6 bytes for 2 chars
     try std.testing.expectEqual(@as(u16, 4), width);
 }
 
 test "InputField prevCharBoundary ASCII" {
     const text = "Hello";
-    try std.testing.expectEqual(@as(usize, 2), InputField.prevCharBoundary(text, 3));
-    try std.testing.expectEqual(@as(usize, 0), InputField.prevCharBoundary(text, 0));
+    try std.testing.expectEqual(@as(usize, 2), text_utf8.prevCharBoundary(text, 3));
+    try std.testing.expectEqual(@as(usize, 0), text_utf8.prevCharBoundary(text, 0));
 }
 
 test "InputField prevCharBoundary UTF-8" {
     const text = "中文"; // 6 bytes: 3 + 3
-    try std.testing.expectEqual(@as(usize, 0), InputField.prevCharBoundary(text, 3));
-    try std.testing.expectEqual(@as(usize, 3), InputField.prevCharBoundary(text, 6));
+    try std.testing.expectEqual(@as(usize, 0), text_utf8.prevCharBoundary(text, 3));
+    try std.testing.expectEqual(@as(usize, 3), text_utf8.prevCharBoundary(text, 6));
 }
 
 test "InputField nextCharBoundary ASCII" {
     const text = "Hello";
-    try std.testing.expectEqual(@as(usize, 3), InputField.nextCharBoundary(text, 2));
-    try std.testing.expectEqual(@as(usize, 5), InputField.nextCharBoundary(text, 5));
+    try std.testing.expectEqual(@as(usize, 3), text_utf8.nextCharBoundary(text, 2));
+    try std.testing.expectEqual(@as(usize, 5), text_utf8.nextCharBoundary(text, 5));
 }
 
 test "InputField nextCharBoundary UTF-8" {
     const text = "中文"; // 6 bytes: 3 + 3
-    try std.testing.expectEqual(@as(usize, 3), InputField.nextCharBoundary(text, 0));
-    try std.testing.expectEqual(@as(usize, 6), InputField.nextCharBoundary(text, 3));
+    try std.testing.expectEqual(@as(usize, 3), text_utf8.nextCharBoundary(text, 0));
+    try std.testing.expectEqual(@as(usize, 6), text_utf8.nextCharBoundary(text, 3));
 }
 
 test "InputField render with placeholder" {

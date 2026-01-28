@@ -107,10 +107,10 @@ pub const TextBuffer = struct {
 
         if (split_col < line.items.len) {
             try new_line.appendSlice(self.allocator, line.items[split_col..]);
-            line.shrinkRetainingCapacity(split_col);
         }
 
         try self.lines.insert(self.allocator, line_idx + 1, new_line);
+        line.shrinkRetainingCapacity(split_col);
     }
 
     pub fn mergeLineWithPrevious(self: *TextBuffer, line_idx: usize) Error!usize {
@@ -255,4 +255,22 @@ test "TextBuffer deleteRange across lines" {
 
     try std.testing.expectEqual(@as(usize, 1), buffer.lineCount());
     try std.testing.expectEqualStrings("af", buffer.lineSlice(0));
+}
+
+test "TextBuffer splitLine preserves content on OOM" {
+    var failing_allocator = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const alloc = failing_allocator.allocator();
+    var buffer = try TextBuffer.init(alloc);
+    defer buffer.deinit();
+
+    try buffer.setText("hello");
+
+    // Ensure insert needs to grow backing array.
+    buffer.lines.shrinkAndFree(alloc, buffer.lines.items.len);
+
+    // Allow one allocation (new_line), then fail on insert.
+    failing_allocator.fail_index = failing_allocator.alloc_index + 1;
+    try std.testing.expectError(error.OutOfMemory, buffer.splitLine(0, 2));
+    try std.testing.expectEqualStrings("hello", buffer.lineSlice(0));
+    try std.testing.expectEqual(@as(usize, 1), buffer.lineCount());
 }
