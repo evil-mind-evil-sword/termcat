@@ -154,6 +154,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "kanban", .path = "examples/kanban.zig" },
         .{ .name = "settings", .path = "examples/settings.zig" },
         .{ .name = "log_viewer", .path = "examples/log_viewer.zig" },
+        .{ .name = "console_overlay", .path = "examples/console_overlay.zig" },
         .{ .name = "cli_demo", .path = "examples/cli_demo.zig" },
     };
 

@@ -17,11 +17,14 @@ const std = @import("std");
 const app_mod = @import("App.zig");
 const Cmd = app_mod.Cmd;
 const Sub = app_mod.Sub;
+const ConsoleOverlay = @import("ConsoleOverlay.zig");
 
 /// Runner configuration options
 pub const Options = struct {
     /// Target frames per second (0 = unlimited)
     target_fps: u8 = 60,
+    /// Optional console overlay configuration (null = disabled)
+    console_overlay: ?ConsoleOverlay.Options = null,
 };
 
 /// Calculate frame time in milliseconds from target FPS
