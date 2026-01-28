@@ -10,6 +10,7 @@ const Cell = @import("../Cell.zig");
 const Event = @import("../Event.zig");
 const unicode = @import("../unicode/width.zig");
 const TextBuffer = @import("../text/TextBuffer.zig").TextBuffer;
+const syntax = @import("../syntax/root.zig");
 
 /// TextArea widget for multi-line editing
 pub const TextArea = struct {
@@ -39,6 +40,30 @@ pub const TextArea = struct {
     const VisualCursor = struct {
         index: usize,
         column: usize,
+    };
+
+    const SyntaxCache = struct {
+        text: std.ArrayListUnmanaged(u8) = .empty,
+        line_offsets: std.ArrayListUnmanaged(usize) = .empty,
+        spans: syntax.SpanBuffer,
+        dirty: bool = true,
+
+        pub fn init(allocator: std.mem.Allocator) SyntaxCache {
+            return .{ .spans = syntax.SpanBuffer.init(allocator) };
+        }
+
+        pub fn deinit(self: *SyntaxCache, allocator: std.mem.Allocator) void {
+            self.spans.deinit();
+            self.text.deinit(allocator);
+            self.line_offsets.deinit(allocator);
+        }
+
+        pub fn clear(self: *SyntaxCache) void {
+            self.text.clearRetainingCapacity();
+            self.line_offsets.clearRetainingCapacity();
+            self.spans.clear();
+            self.dirty = true;
+        }
     };
 
     /// Text content buffer
@@ -78,6 +103,14 @@ pub const TextArea = struct {
     selection_anchor: ?Position = null,
     /// Normalized selection range (start <= end). Null when no selection.
     selection: ?Selection = null,
+    /// Optional syntax highlight registry
+    syntax_registry: ?*syntax.HighlighterRegistry = null,
+    /// Optional syntax style registry
+    syntax_style: ?*syntax.SyntaxStyle = null,
+    /// Optional syntax language (owned)
+    syntax_language: ?[]u8 = null,
+    /// Syntax highlight cache
+    syntax_cache: SyntaxCache,
 
     /// Create an empty text area
     pub fn init(allocator: std.mem.Allocator) !TextArea {
@@ -86,6 +119,7 @@ pub const TextArea = struct {
         return .{
             .buffer = buffer,
             .allocator = allocator,
+            .syntax_cache = SyntaxCache.init(allocator),
         };
     }
 
@@ -99,6 +133,10 @@ pub const TextArea = struct {
     /// Clean up resources
     pub fn deinit(self: *TextArea) void {
         self.buffer.deinit();
+        if (self.syntax_language) |lang| {
+            self.allocator.free(lang);
+        }
+        self.syntax_cache.deinit(self.allocator);
     }
 
     // Builder methods
@@ -151,6 +189,34 @@ pub const TextArea = struct {
         return self;
     }
 
+    /// Enable syntax highlighting for the text area.
+    pub fn withSyntax(self: *TextArea, registry: *syntax.HighlighterRegistry, styles: *syntax.SyntaxStyle, language: []const u8) *TextArea {
+        _ = self.setSyntax(registry, styles, language) catch {};
+        return self;
+    }
+
+    /// Set syntax highlighting configuration.
+    pub fn setSyntax(self: *TextArea, registry: *syntax.HighlighterRegistry, styles: *syntax.SyntaxStyle, language: []const u8) !void {
+        if (self.syntax_language) |existing| {
+            self.allocator.free(existing);
+        }
+        self.syntax_language = try self.allocator.dupe(u8, language);
+        self.syntax_registry = registry;
+        self.syntax_style = styles;
+        self.syntax_cache.dirty = true;
+    }
+
+    /// Disable syntax highlighting and clear cached spans.
+    pub fn clearSyntax(self: *TextArea) void {
+        if (self.syntax_language) |existing| {
+            self.allocator.free(existing);
+        }
+        self.syntax_language = null;
+        self.syntax_registry = null;
+        self.syntax_style = null;
+        self.syntax_cache.clear();
+    }
+
     // Content methods
 
     /// Set text content (replaces all)
@@ -164,6 +230,7 @@ pub const TextArea = struct {
         self.scroll_y = 0;
         self.scroll_x = 0;
         self.clearSelection();
+        self.syntax_cache.dirty = true;
     }
 
     /// Get text content
@@ -811,8 +878,110 @@ pub const TextArea = struct {
     }
 
     fn notifyChange(self: *TextArea) void {
+        self.syntax_cache.dirty = true;
         if (self.on_change) |callback| {
             callback(self.callback_ctx);
+        }
+    }
+
+    fn ensureSyntaxCache(self: *TextArea) void {
+        if (self.syntax_registry == null or self.syntax_style == null or self.syntax_language == null) return;
+        if (!self.syntax_cache.dirty) return;
+
+        self.syntax_cache.text.clearRetainingCapacity();
+        self.syntax_cache.line_offsets.clearRetainingCapacity();
+
+        var offset: usize = 0;
+        const line_count = self.buffer.lineCount();
+        var line_idx: usize = 0;
+        while (line_idx < line_count) : (line_idx += 1) {
+            self.syntax_cache.line_offsets.append(self.allocator, offset) catch {
+                self.syntax_cache.spans.clear();
+                self.syntax_cache.dirty = false;
+                return;
+            };
+            const line = self.buffer.lineSlice(line_idx);
+            self.syntax_cache.text.appendSlice(self.allocator, line) catch {
+                self.syntax_cache.spans.clear();
+                self.syntax_cache.dirty = false;
+                return;
+            };
+            offset += line.len;
+            if (line_idx + 1 < line_count) {
+                self.syntax_cache.text.append(self.allocator, '\n') catch {
+                    self.syntax_cache.spans.clear();
+                    self.syntax_cache.dirty = false;
+                    return;
+                };
+                offset += 1;
+            }
+        }
+
+        _ = self.syntax_registry.?.highlightOrEmpty(
+            self.syntax_language.?,
+            self.syntax_cache.text.items,
+            &self.syntax_cache.spans,
+            self.syntax_style.?,
+        );
+        self.syntax_cache.dirty = false;
+    }
+
+    fn renderLineSegmentWithSyntax(
+        self: *TextArea,
+        view: *PlaneView,
+        base_x: u16,
+        y: u16,
+        line_idx: usize,
+        line: []const u8,
+        seg_start: usize,
+        seg_end: usize,
+        base_style: Style,
+    ) void {
+        if (seg_start >= seg_end) return;
+        if (self.syntax_registry == null or self.syntax_style == null or self.syntax_language == null) {
+            view.print(@intCast(base_x), @intCast(y), line[seg_start..seg_end], base_style.fg, base_style.bg, base_style.attrs);
+            return;
+        }
+        if (line_idx >= self.syntax_cache.line_offsets.items.len) {
+            view.print(@intCast(base_x), @intCast(y), line[seg_start..seg_end], base_style.fg, base_style.bg, base_style.attrs);
+            return;
+        }
+
+        const line_start = self.syntax_cache.line_offsets.items[line_idx];
+        const range_start = line_start + seg_start;
+        const range_end = line_start + seg_end;
+
+        var cursor = seg_start;
+        const spans = self.syntax_cache.spans.spans.items;
+
+        for (spans) |span| {
+            if (span.end <= range_start) continue;
+            if (span.start >= range_end) break;
+
+            const span_start_abs = if (span.start > range_start) span.start else range_start;
+            const span_end_abs = if (span.end < range_end) span.end else range_end;
+            if (span_start_abs >= span_end_abs) continue;
+
+            const span_start = span_start_abs - line_start;
+            const span_end = span_end_abs - line_start;
+
+            if (span_start > cursor) {
+                const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, span_start)));
+                view.print(@intCast(x), @intCast(y), line[cursor..span_start], base_style.fg, base_style.bg, base_style.attrs);
+            }
+
+            var styled = base_style;
+            if (self.syntax_style.?.resolveById(span.style_id)) |def| {
+                styled = syntax.SyntaxStyle.applyDefinition(def, base_style);
+            }
+            const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, span_start)));
+            view.print(@intCast(x), @intCast(y), line[span_start..span_end], styled.fg, styled.bg, styled.attrs);
+            cursor = span_end;
+        }
+
+        if (cursor < seg_end) {
+            const x = base_x + @as(u16, @intCast(displayWidthBetween(line, seg_start, cursor)));
+            view.print(@intCast(x), @intCast(y), line[cursor..seg_end], base_style.fg, base_style.bg, base_style.attrs);
         }
     }
 
@@ -831,6 +1000,7 @@ pub const TextArea = struct {
         const size = view.size();
 
         if (size.width == 0 or size.height == 0) return;
+        self.ensureSyntaxCache();
 
         if (!self.wrapEnabled()) {
             const line_num_width: u16 = if (self.show_line_numbers) 5 else 0;
@@ -866,8 +1036,16 @@ pub const TextArea = struct {
                     const start_byte = @min(self.scroll_x, line.len);
 
                     if (start_byte < line.len) {
-                        // Pass the rest of the line from scroll position; PlaneView.print clips to view bounds
-                        view.print(@intCast(text_start_x), @intCast(y), line[start_byte..], self.style.fg, self.style.bg, self.style.attrs);
+                        self.renderLineSegmentWithSyntax(
+                            view,
+                            text_start_x,
+                            @intCast(y),
+                            line_idx,
+                            line,
+                            start_byte,
+                            line.len,
+                            self.style,
+                        );
                     }
 
                     // Draw selection highlight
@@ -945,7 +1123,16 @@ pub const TextArea = struct {
             }
 
             if (visual.start < visual.end) {
-                view.print(@intCast(text_start_x), @intCast(y), line[visual.start..visual.end], self.style.fg, self.style.bg, self.style.attrs);
+                self.renderLineSegmentWithSyntax(
+                    view,
+                    text_start_x,
+                    @intCast(y),
+                    line_idx,
+                    line,
+                    visual.start,
+                    visual.end,
+                    self.style,
+                );
             }
 
             // Draw selection highlight

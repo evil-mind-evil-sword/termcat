@@ -156,6 +156,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "log_viewer", .path = "examples/log_viewer.zig" },
         .{ .name = "console_overlay", .path = "examples/console_overlay.zig" },
         .{ .name = "cli_demo", .path = "examples/cli_demo.zig" },
+        .{ .name = "syntax_highlight", .path = "examples/syntax_highlight.zig" },
     };
 
     for (examples) |example| {
