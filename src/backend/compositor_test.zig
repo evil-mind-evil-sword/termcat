@@ -11,6 +11,7 @@ const Blit = termcat.Blit;
 const Event = termcat.Event;
 const Rect = Event.Rect;
 const Color = Cell.Color;
+const color = termcat.color;
 
 // =============================================================================
 // Compositor PTY Regression Tests
@@ -145,6 +146,44 @@ test "Compositor z-order: raise/lower changes render order" {
 
     // Position 6-7 should be B (only child2 visible there)
     try expectCell(&target, 6, 0, 'B', Color.blue);
+}
+
+test "Compositor alpha: background blend preserves underlying glyph" {
+    const allocator = std.testing.allocator;
+
+    var target = try Buffer.init(allocator, .{ .width = 4, .height = 2 });
+    defer target.deinit();
+
+    var compositor = Compositor.init(allocator, &target);
+    defer compositor.deinit();
+
+    const root = try Plane.initRoot(allocator, .{ .width = 4, .height = 2 });
+    defer root.deinit();
+
+    root.print(0, 0, "A", Color.white, Color.blue, .{});
+
+    const overlay = try Plane.initChild(root, 0, 0, .{ .width = 4, .height = 2 });
+    overlay.setCell(0, 0, Cell{
+        .char = ' ',
+        .combining = .{ 0, 0, 0, 0, 0, 0, 0, 0 },
+        .fg = .default,
+        .bg = Color.fromRgba(255, 0, 0, 128),
+        .attrs = .{},
+    });
+
+    const dirty = try compositor.compose(root);
+    defer allocator.free(dirty);
+
+    const cell = target.getCell(0, 0);
+    try std.testing.expectEqual(@as(u21, 'A'), cell.char);
+    try std.testing.expect(cell.fg.eql(Color.white));
+
+    const expected = color.blend(
+        .{ 255, 0, 0 },
+        .{ 0, 0, 128 },
+        @as(f32, @floatFromInt(128)) / 255.0,
+    );
+    try std.testing.expect(cell.bg.eql(Color.fromRgb(expected[0], expected[1], expected[2])));
 }
 
 // =============================================================================

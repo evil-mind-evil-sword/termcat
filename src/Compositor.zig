@@ -6,6 +6,7 @@ const Event = @import("Event.zig");
 const Size = Event.Size;
 const Rect = Event.Rect;
 const unicode = @import("unicode/width.zig");
+const color = @import("color.zig");
 
 /// Compositor for merging planes into a target buffer.
 ///
@@ -293,9 +294,15 @@ fn compositePlaneRegion(self: *Compositor, plane: *const Plane, region: Rect, pl
             }
 
             // Skip transparent cells (default space with default colors)
-            if (isTransparent(cell)) continue;
+            if (isTransparent(cell) or isAlphaTransparent(cell)) continue;
 
-            self.target.setCell(screen_x, screen_y, cell);
+            if (!cellHasAlpha(cell)) {
+                self.target.setCell(screen_x, screen_y, cell);
+            } else {
+                const base = self.target.getCell(screen_x, screen_y);
+                const blended = blendCell(cell, base);
+                self.target.setCell(screen_x, screen_y, blended);
+            }
         }
     }
 }
@@ -344,6 +351,64 @@ fn isTransparent(cell: Cell) bool {
         cell.bg.eql(.default) and
         cell.attrs.eql(.{}) and
         !cell.hasCombining();
+}
+
+/// Alpha-transparent cells (fully transparent colors with no glyph).
+fn isAlphaTransparent(cell: Cell) bool {
+    if (cell.char != ' ') return false;
+    if (!cell.attrs.eql(.{})) return false;
+    if (cell.hasCombining()) return false;
+    return cell.fg.alpha() == 0 and cell.bg.alpha() == 0;
+}
+
+fn cellHasAlpha(cell: Cell) bool {
+    return cell.fg.alpha() < 255 or cell.bg.alpha() < 255;
+}
+
+fn blendCell(overlay: Cell, base: Cell) Cell {
+    var result = base;
+
+    const bg_alpha = overlay.bg.alpha();
+    if (bg_alpha < 255) {
+        result.bg = blendColor(overlay.bg, base.bg, bg_alpha);
+    } else {
+        result.bg = overlay.bg;
+    }
+
+    const fg_alpha = overlay.fg.alpha();
+    const overlay_has_glyph = overlay.isContinuation() or
+        overlay.char != ' ' or
+        overlay.hasCombining() or
+        !overlay.attrs.eql(.{}) or
+        (fg_alpha > 0 and !overlay.fg.eql(.default));
+
+    if (overlay_has_glyph) {
+        result.char = overlay.char;
+        result.combining = overlay.combining;
+        result.attrs = overlay.attrs;
+
+        if (fg_alpha < 255) {
+            result.fg = blendColor(overlay.fg, result.bg, fg_alpha);
+        } else {
+            result.fg = overlay.fg;
+        }
+    }
+
+    return result;
+}
+
+fn blendColor(fg: Cell.Color, bg: Cell.Color, alpha: u8) Cell.Color {
+    if (alpha == 0) return bg;
+    if (alpha == 255) return fg;
+
+    const fg_rgb = fg.toRgb();
+    const bg_rgb = bg.toRgb();
+    const blended = color.blend(
+        .{ fg_rgb.r, fg_rgb.g, fg_rgb.b },
+        .{ bg_rgb.r, bg_rgb.g, bg_rgb.b },
+        @as(f32, @floatFromInt(alpha)) / 255.0,
+    );
+    return Cell.Color.fromRgb(blended[0], blended[1], blended[2]);
 }
 
 /// Compute plane bounds at a given position (for move tracking).

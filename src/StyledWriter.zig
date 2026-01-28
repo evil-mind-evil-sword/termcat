@@ -156,6 +156,9 @@ fn emitFgColor(writer: std.io.AnyWriter, color: Color) !void {
         .rgb => |c| {
             try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
         },
+        .rgba => |c| {
+            try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
+        },
     }
 }
 
@@ -172,6 +175,9 @@ fn emitBgColor(writer: std.io.AnyWriter, color: Color) !void {
             }
         },
         .rgb => |c| {
+            try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
+        },
+        .rgba => |c| {
             try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
         },
     }

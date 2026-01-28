@@ -38,6 +38,8 @@ pub const Color = union(enum) {
     index: u8,
     /// True color (24-bit RGB)
     rgb: struct { r: u8, g: u8, b: u8 },
+    /// True color with alpha (RGBA)
+    rgba: struct { r: u8, g: u8, b: u8, a: u8 },
 
     /// Named colors (map to indices 0-15)
     pub const black: Color = .{ .index = 0 };
@@ -62,6 +64,11 @@ pub const Color = union(enum) {
     /// Create an RGB color
     pub fn fromRgb(r: u8, g: u8, b: u8) Color {
         return .{ .rgb = .{ .r = r, .g = g, .b = b } };
+    }
+
+    /// Create an RGBA color
+    pub fn fromRgba(r: u8, g: u8, b: u8, a: u8) Color {
+        return .{ .rgba = .{ .r = r, .g = g, .b = b, .a = a } };
     }
 
     /// Create a grayscale color from a gray value (0-255)
@@ -129,7 +136,24 @@ pub const Color = union(enum) {
                 .rgb => |c2| c1.r == c2.r and c1.g == c2.g and c1.b == c2.b,
                 else => false,
             },
+            .rgba => |c1| switch (other) {
+                .rgba => |c2| c1.r == c2.r and c1.g == c2.g and c1.b == c2.b and c1.a == c2.a,
+                else => false,
+            },
         };
+    }
+
+    /// Alpha channel (0-255). Non-RGBA colors are fully opaque (255).
+    pub fn alpha(self: Color) u8 {
+        return switch (self) {
+            .rgba => |c| c.a,
+            else => 255,
+        };
+    }
+
+    /// Returns true if color is fully opaque.
+    pub fn isOpaque(self: Color) bool {
+        return self.alpha() == 255;
     }
 
     /// RGB color components
@@ -142,6 +166,7 @@ pub const Color = union(enum) {
             .default => .{ .r = 192, .g = 192, .b = 192 }, // Light gray as default approximation
             .index => |idx| indexToRgb(idx),
             .rgb => |c| .{ .r = c.r, .g = c.g, .b = c.b },
+            .rgba => |c| .{ .r = c.r, .g = c.g, .b = c.b },
         };
     }
 
@@ -269,19 +294,26 @@ pub const Color = union(enum) {
     /// Downgrade a color to the specified color depth.
     /// Returns a new Color that can be rendered at the target depth.
     pub fn downgrade(self: Color, target_depth: ColorDepth) Color {
+        const base: Color = switch (self) {
+            .rgba => |c| .{ .rgb = .{ .r = c.r, .g = c.g, .b = c.b } },
+            else => self,
+        };
+
         return switch (target_depth) {
             .mono => .default, // Mono terminals use default colors only
-            .basic => switch (self) {
+            .basic => switch (base) {
                 .default => .default,
                 .index => |idx| .{ .index = if (idx < 16) idx else idx256To16(idx) },
                 .rgb => |c| .{ .index = rgbTo16(c.r, c.g, c.b) },
+                .rgba => unreachable,
             },
-            .color_256 => switch (self) {
+            .color_256 => switch (base) {
                 .default => .default,
-                .index => self, // Already valid
+                .index => base, // Already valid
                 .rgb => |c| .{ .index = rgbTo256(c.r, c.g, c.b) },
+                .rgba => unreachable,
             },
-            .true_color => self, // No downgrade needed
+            .true_color => base, // No downgrade needed
         };
     }
 };
@@ -424,6 +456,8 @@ test "Color equality" {
     try std.testing.expect(!Color.red.eql(Color.green));
     try std.testing.expect(Color.fromRgb(255, 0, 0).eql(Color.fromRgb(255, 0, 0)));
     try std.testing.expect(!Color.fromRgb(255, 0, 0).eql(Color.fromRgb(0, 255, 0)));
+    try std.testing.expect(Color.fromRgba(10, 20, 30, 40).eql(Color.fromRgba(10, 20, 30, 40)));
+    try std.testing.expect(!Color.fromRgba(10, 20, 30, 40).eql(Color.fromRgba(10, 20, 30, 41)));
 }
 
 test "Attributes equality" {
@@ -469,6 +503,16 @@ test "Color.fromGray" {
 
     const gray_255 = Color.fromGray(255);
     try std.testing.expectEqual(@as(u8, 231), gray_255.index);
+}
+
+test "Color alpha helpers" {
+    const rgba = Color.fromRgba(12, 34, 56, 128);
+    try std.testing.expectEqual(@as(u8, 128), rgba.alpha());
+    try std.testing.expect(!rgba.isOpaque());
+
+    const rgb = Color.fromRgb(12, 34, 56);
+    try std.testing.expectEqual(@as(u8, 255), rgb.alpha());
+    try std.testing.expect(rgb.isOpaque());
 }
 
 test "Color.fromHsl basic colors" {

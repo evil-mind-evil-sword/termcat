@@ -189,6 +189,19 @@ fn writeColorSgr(buf: []u8, color: Color, is_bg: bool) usize {
             pos += 1;
             pos += writeU8(buf[pos..], c.b);
         },
+        .rgba => |c| {
+            // True color: ;38;2;R;G;B or ;48;2;R;G;B (alpha ignored)
+            const prefix: []const u8 = if (is_bg) ";48;2;" else ";38;2;";
+            @memcpy(buf[pos..][0..prefix.len], prefix);
+            pos += prefix.len;
+            pos += writeU8(buf[pos..], c.r);
+            buf[pos] = ';';
+            pos += 1;
+            pos += writeU8(buf[pos..], c.g);
+            buf[pos] = ';';
+            pos += 1;
+            pos += writeU8(buf[pos..], c.b);
+        },
     }
 
     return pos;
