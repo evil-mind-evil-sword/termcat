@@ -438,6 +438,29 @@ pub fn hasCombining(self: Cell) bool {
     return self.combining[0] != 0;
 }
 
+/// Check if this cell is transparent (should not overwrite underlying content).
+///
+/// A cell is transparent only if:
+/// - It is a space character (not a continuation cell char==0)
+/// - It has default foreground AND background colors
+/// - It has no text attributes set
+/// - It has no combining marks
+///
+/// Note: This means continuation cells (char == 0, second half of wide chars)
+/// are NEVER transparent - they are always copied to preserve wide character
+/// integrity. If you want an opaque "blank" region (like a dialog background),
+/// set a non-default background color.
+pub fn isTransparent(self: Cell) bool {
+    // Continuation cells (char == 0) are never transparent
+    if (self.isContinuation()) return false;
+
+    return self.char == ' ' and
+        self.fg.eql(.default) and
+        self.bg.eql(.default) and
+        self.attrs.eql(.{}) and
+        !self.hasCombining();
+}
+
 test "Cell default" {
     const cell = default;
     try std.testing.expectEqual(@as(u21, ' '), cell.char);

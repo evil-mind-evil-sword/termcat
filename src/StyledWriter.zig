@@ -15,6 +15,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Cell = @import("Cell.zig");
+const Sgr = @import("Sgr.zig");
 const Style = @import("Style.zig");
 const detectCapabilities = if (builtin.os.tag == .windows)
     @import("backend/windows.zig").detectCapabilities
@@ -94,45 +95,15 @@ const StyleState = struct {
 
         var reset_emitted = false;
         if (need_attr_change) {
-            if (self.attrs == null) {
-                try writer.writeAll(Style.RESET_SEQ);
-                reset_emitted = true;
-            }
-
-            const old_attrs = self.attrs orelse Attributes{};
-            const new_attrs = effective.attrs;
-
-            if ((old_attrs.bold and !new_attrs.bold) or (old_attrs.dim and !new_attrs.dim)) {
-                try writer.writeAll("\x1b[22m");
-                if (new_attrs.bold) try writer.writeAll("\x1b[1m");
-                if (new_attrs.dim) try writer.writeAll("\x1b[2m");
-            } else {
-                if (!old_attrs.bold and new_attrs.bold) try writer.writeAll("\x1b[1m");
-                if (!old_attrs.dim and new_attrs.dim) try writer.writeAll("\x1b[2m");
-            }
-
-            if (old_attrs.italic and !new_attrs.italic) try writer.writeAll("\x1b[23m");
-            if (!old_attrs.italic and new_attrs.italic) try writer.writeAll("\x1b[3m");
-
-            if (old_attrs.underline and !new_attrs.underline) try writer.writeAll("\x1b[24m");
-            if (!old_attrs.underline and new_attrs.underline) try writer.writeAll("\x1b[4m");
-
-            if (old_attrs.blink and !new_attrs.blink) try writer.writeAll("\x1b[25m");
-            if (!old_attrs.blink and new_attrs.blink) try writer.writeAll("\x1b[5m");
-
-            if (old_attrs.reverse and !new_attrs.reverse) try writer.writeAll("\x1b[27m");
-            if (!old_attrs.reverse and new_attrs.reverse) try writer.writeAll("\x1b[7m");
-
-            if (old_attrs.strikethrough and !new_attrs.strikethrough) try writer.writeAll("\x1b[29m");
-            if (!old_attrs.strikethrough and new_attrs.strikethrough) try writer.writeAll("\x1b[9m");
+            reset_emitted = try Sgr.emitAttributeDiff(writer, self.attrs, effective.attrs, true);
         }
 
         if (need_fg_change and !(reset_emitted and effective.fg.eql(.default))) {
-            try emitFgColor(writer, effective.fg);
+            try Sgr.emitFgColor(writer, effective.fg);
         }
 
         if (need_bg_change and !(reset_emitted and effective.bg.eql(.default))) {
-            try emitBgColor(writer, effective.bg);
+            try Sgr.emitBgColor(writer, effective.bg);
         }
 
         self.fg = effective.fg;
@@ -140,48 +111,6 @@ const StyleState = struct {
         self.attrs = effective.attrs;
     }
 };
-
-fn emitFgColor(writer: std.io.AnyWriter, color: Color) !void {
-    switch (color) {
-        .default => try writer.writeAll("\x1b[39m"),
-        .index => |idx| {
-            if (idx < 8) {
-                try writer.print("\x1b[{d}m", .{30 + idx});
-            } else if (idx < 16) {
-                try writer.print("\x1b[{d}m", .{90 + idx - 8});
-            } else {
-                try writer.print("\x1b[38;5;{d}m", .{idx});
-            }
-        },
-        .rgb => |c| {
-            try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-        .rgba => |c| {
-            try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-    }
-}
-
-fn emitBgColor(writer: std.io.AnyWriter, color: Color) !void {
-    switch (color) {
-        .default => try writer.writeAll("\x1b[49m"),
-        .index => |idx| {
-            if (idx < 8) {
-                try writer.print("\x1b[{d}m", .{40 + idx});
-            } else if (idx < 16) {
-                try writer.print("\x1b[{d}m", .{100 + idx - 8});
-            } else {
-                try writer.print("\x1b[48;5;{d}m", .{idx});
-            }
-        },
-        .rgb => |c| {
-            try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-        .rgba => |c| {
-            try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-    }
-}
 
 test "StyledWriter avoids redundant style sequences" {
     var buf: [128]u8 = undefined;

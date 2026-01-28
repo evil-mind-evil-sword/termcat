@@ -1,5 +1,6 @@
 const std = @import("std");
 const Cell = @import("Cell.zig");
+const Sgr = @import("Sgr.zig");
 const Color = Cell.Color;
 const ColorDepth = Cell.ColorDepth;
 const Attributes = Cell.Attributes;
@@ -248,40 +249,7 @@ fn emitAttributeChanges(
         // On first render (last_attrs is null), emit a full reset to clear any
         // stale terminal attributes inherited from the shell prompt or prior state.
         // This establishes a clean baseline before applying the new attributes.
-        if (last_attrs.* == null) {
-            try writer.writeAll("\x1b[0m");
-        }
-
-        const old_attrs = last_attrs.* orelse Attributes{};
-        const new_attrs = cell.attrs;
-
-        // Turn OFF attributes that were on but are now off
-        // Bold and dim share a reset code (22), so handle them together
-        if ((old_attrs.bold and !new_attrs.bold) or (old_attrs.dim and !new_attrs.dim)) {
-            try writer.writeAll("\x1b[22m");
-            // If we reset bold/dim but still need one of them, re-apply
-            if (new_attrs.bold) try writer.writeAll("\x1b[1m");
-            if (new_attrs.dim) try writer.writeAll("\x1b[2m");
-        } else {
-            // Turn ON attributes that were off but are now on
-            if (!old_attrs.bold and new_attrs.bold) try writer.writeAll("\x1b[1m");
-            if (!old_attrs.dim and new_attrs.dim) try writer.writeAll("\x1b[2m");
-        }
-
-        if (old_attrs.italic and !new_attrs.italic) try writer.writeAll("\x1b[23m");
-        if (!old_attrs.italic and new_attrs.italic) try writer.writeAll("\x1b[3m");
-
-        if (old_attrs.underline and !new_attrs.underline) try writer.writeAll("\x1b[24m");
-        if (!old_attrs.underline and new_attrs.underline) try writer.writeAll("\x1b[4m");
-
-        if (old_attrs.blink and !new_attrs.blink) try writer.writeAll("\x1b[25m");
-        if (!old_attrs.blink and new_attrs.blink) try writer.writeAll("\x1b[5m");
-
-        if (old_attrs.reverse and !new_attrs.reverse) try writer.writeAll("\x1b[27m");
-        if (!old_attrs.reverse and new_attrs.reverse) try writer.writeAll("\x1b[7m");
-
-        if (old_attrs.strikethrough and !new_attrs.strikethrough) try writer.writeAll("\x1b[29m");
-        if (!old_attrs.strikethrough and new_attrs.strikethrough) try writer.writeAll("\x1b[9m");
+        _ = try Sgr.emitAttributeDiff(writer, last_attrs.*, cell.attrs, true);
     }
 
     // Apply foreground color if changed
@@ -303,56 +271,14 @@ fn emitAttributeChanges(
 fn emitFgColor(self: *Renderer, writer: anytype, color: Color) !void {
     // Downgrade color to match terminal capability
     const effective_color = color.downgrade(self.color_depth);
-
-    switch (effective_color) {
-        .default => try writer.writeAll("\x1b[39m"),
-        .index => |idx| {
-            if (idx < 8) {
-                try writer.print("\x1b[{d}m", .{30 + idx});
-            } else if (idx < 16) {
-                try writer.print("\x1b[{d}m", .{90 + idx - 8});
-            } else {
-                // 256-color mode (only reached if color_depth >= color_256)
-                try writer.print("\x1b[38;5;{d}m", .{idx});
-            }
-        },
-        .rgb => |c| {
-            // Only reached if color_depth == true_color
-            try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-        .rgba => |c| {
-            // Alpha is ignored in terminal output
-            try writer.print("\x1b[38;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-    }
+    try Sgr.emitFgColor(writer, effective_color);
 }
 
 /// Emit background color sequence
 fn emitBgColor(self: *Renderer, writer: anytype, color: Color) !void {
     // Downgrade color to match terminal capability
     const effective_color = color.downgrade(self.color_depth);
-
-    switch (effective_color) {
-        .default => try writer.writeAll("\x1b[49m"),
-        .index => |idx| {
-            if (idx < 8) {
-                try writer.print("\x1b[{d}m", .{40 + idx});
-            } else if (idx < 16) {
-                try writer.print("\x1b[{d}m", .{100 + idx - 8});
-            } else {
-                // 256-color mode (only reached if color_depth >= color_256)
-                try writer.print("\x1b[48;5;{d}m", .{idx});
-            }
-        },
-        .rgb => |c| {
-            // Only reached if color_depth == true_color
-            try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-        .rgba => |c| {
-            // Alpha is ignored in terminal output
-            try writer.print("\x1b[48;2;{d};{d};{d}m", .{ c.r, c.g, c.b });
-        },
-    }
+    try Sgr.emitBgColor(writer, effective_color);
 }
 
 /// Emit a character with its combining marks (UTF-8 encoded)

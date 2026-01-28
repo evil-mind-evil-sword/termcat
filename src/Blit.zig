@@ -89,14 +89,7 @@ pub fn computeClippedRegion(
 /// - It has no text attributes set
 /// - It has no combining marks
 pub fn isTransparent(cell: Cell) bool {
-    // Continuation cells (char == 0) are never transparent - they preserve wide char integrity
-    if (cell.char == 0) return false;
-
-    return cell.char == ' ' and
-        cell.fg.eql(.default) and
-        cell.bg.eql(.default) and
-        cell.attrs.eql(.{}) and
-        !cell.hasCombining();
+    return cell.isTransparent();
 }
 
 /// Copy cells from a source buffer to a destination plane.

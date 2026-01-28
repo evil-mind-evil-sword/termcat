@@ -294,7 +294,7 @@ fn compositePlaneRegion(self: *Compositor, plane: *const Plane, region: Rect, pl
             }
 
             // Skip transparent cells (default space with default colors)
-            if (isTransparent(cell) or isAlphaTransparent(cell)) continue;
+            if (cell.isTransparent() or isAlphaTransparent(cell)) continue;
 
             if (!cellHasAlpha(cell)) {
                 self.target.setCell(screen_x, screen_y, cell);
@@ -342,17 +342,6 @@ fn isOrphanContinuation(
 /// are NEVER transparent - they are always copied to preserve wide character
 /// integrity. If you want an opaque "blank" region (like a dialog background),
 /// set a non-default background color.
-fn isTransparent(cell: Cell) bool {
-    // Continuation cells (char == 0) are never transparent
-    if (cell.char == 0) return false;
-
-    return cell.char == ' ' and
-        cell.fg.eql(.default) and
-        cell.bg.eql(.default) and
-        cell.attrs.eql(.{}) and
-        !cell.hasCombining();
-}
-
 /// Alpha-transparent cells (fully transparent colors with no glyph).
 fn isAlphaTransparent(cell: Cell) bool {
     if (cell.char != ' ') return false;
@@ -981,7 +970,7 @@ test "Compositor visibility change invalidates region" {
 
 test "isTransparent" {
     // Default cell is transparent
-    try std.testing.expect(isTransparent(Cell.default));
+    try std.testing.expect(Cell.default.isTransparent());
 
     // Cell with character is not transparent
     const char_cell = Cell{
@@ -991,7 +980,7 @@ test "isTransparent" {
         .bg = .default,
         .attrs = .{},
     };
-    try std.testing.expect(!isTransparent(char_cell));
+    try std.testing.expect(!char_cell.isTransparent());
 
     // Cell with background color is not transparent
     const bg_cell = Cell{
@@ -1001,7 +990,7 @@ test "isTransparent" {
         .bg = Cell.Color.blue,
         .attrs = .{},
     };
-    try std.testing.expect(!isTransparent(bg_cell));
+    try std.testing.expect(!bg_cell.isTransparent());
 
     // Cell with attributes is not transparent
     const attr_cell = Cell{
@@ -1011,7 +1000,7 @@ test "isTransparent" {
         .bg = .default,
         .attrs = .{ .reverse = true },
     };
-    try std.testing.expect(!isTransparent(attr_cell));
+    try std.testing.expect(!attr_cell.isTransparent());
 
     // Continuation cells (char == 0) are NEVER transparent (wide char integrity)
     const continuation_cell = Cell{
@@ -1021,7 +1010,7 @@ test "isTransparent" {
         .bg = .default,
         .attrs = .{},
     };
-    try std.testing.expect(!isTransparent(continuation_cell));
+    try std.testing.expect(!continuation_cell.isTransparent());
 }
 
 // ============================================================================
