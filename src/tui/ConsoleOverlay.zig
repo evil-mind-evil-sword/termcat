@@ -4,6 +4,7 @@
 //! fixed-size entry slots and a ring buffer.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const Widget = @import("Widget.zig");
 const PlaneView = @import("PlaneView.zig").PlaneView;
 const Event = @import("../Event.zig");
@@ -11,6 +12,8 @@ const Cell = @import("../Cell.zig");
 const Layout = @import("../Layout.zig");
 const Style = @import("Theme.zig").Style;
 const LogLevel = @import("Log.zig").LogLevel;
+
+pub const CopyHandler = *const fn (ctx: ?*anyopaque, text: []const u8) void;
 
 pub const Position = enum {
     top,
@@ -56,6 +59,14 @@ pub const Options = struct {
     box_style: Layout.BoxStyle = Layout.BoxStyle.ascii,
     /// Title text in the border.
     title: []const u8 = "Console",
+    /// Selection highlight style.
+    selection_style: Style = .{ .attrs = .{ .reverse = true } },
+    /// Key used to copy selected text.
+    copy_key: Event.Key = Event.Key.fromCodepoint('c', .{ .ctrl = true }),
+    /// Optional selection copy handler.
+    on_copy: ?CopyHandler = null,
+    /// Context for the selection copy handler.
+    copy_ctx: ?*anyopaque = null,
 };
 
 pub const ConsoleOverlay = struct {
@@ -83,8 +94,17 @@ pub const ConsoleOverlay = struct {
     level_styles: [4]Style,
     box_style: Layout.BoxStyle,
     title: []const u8,
+    selection_style: Style,
+    copy_key: Event.Key,
+    on_copy: ?CopyHandler,
+    copy_ctx: ?*anyopaque,
     last_rect: ?Event.Rect = null,
+    last_content_rect: ?Event.Rect = null,
     last_content_lines: u16 = 0,
+    selection_anchor: ?SelectionPoint = null,
+    selection_focus: ?SelectionPoint = null,
+    selection: ?SelectionRange = null,
+    dragging: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ConsoleOverlay {
         const max_entries = @max(options.max_entries, 1);
@@ -121,6 +141,10 @@ pub const ConsoleOverlay = struct {
             .level_styles = options.level_styles,
             .box_style = options.box_style,
             .title = options.title,
+            .selection_style = options.selection_style,
+            .copy_key = options.copy_key,
+            .on_copy = options.on_copy,
+            .copy_ctx = options.copy_ctx,
         };
     }
 
@@ -170,9 +194,13 @@ pub const ConsoleOverlay = struct {
         self.entry_head = 0;
         self.entry_count = 0;
         self.scroll_offset = 0;
+        self.clearSelection();
     }
 
     pub fn append(self: *ConsoleOverlay, level: LogLevel, text: []const u8) void {
+        if (self.entry_count == self.max_entries) {
+            self.clearSelection();
+        }
         const slot = self.textSlot(self.entry_head);
         const len = @min(slot.len, text.len);
         if (len > 0) {
@@ -263,6 +291,34 @@ pub const ConsoleOverlay = struct {
         }
     }
 
+    pub fn setCopyHandler(self: *ConsoleOverlay, ctx: ?*anyopaque, handler: ?CopyHandler) void {
+        self.copy_ctx = ctx;
+        self.on_copy = handler;
+    }
+
+    pub fn selectionText(self: *ConsoleOverlay, allocator: std.mem.Allocator) !?[]u8 {
+        const selection = self.selection orelse return null;
+        var buffer = std.ArrayList(u8).init(allocator);
+        errdefer buffer.deinit();
+
+        var line_idx = selection.start.line;
+        while (line_idx <= selection.end.line) : (line_idx += 1) {
+            const entry_view = self.entryView(line_idx);
+            const entry = entry_view.entry;
+            const line_len = self.lineDisplayLen(entry);
+            const start_col: usize = if (line_idx == selection.start.line) selection.start.col else 0;
+            const end_col: usize = if (line_idx == selection.end.line) selection.end.col else line_len;
+            if (start_col < end_col) {
+                try self.appendLineSegment(&buffer, entry_view, start_col, end_col);
+            }
+            if (line_idx != selection.end.line) {
+                try buffer.append('\n');
+            }
+        }
+
+        return buffer.toOwnedSlice();
+    }
+
     fn measure(ptr: *anyopaque, constraint: Widget.SizeConstraint) Widget.MeasuredSize {
         const self: *ConsoleOverlay = @ptrCast(@alignCast(ptr));
         _ = self;
@@ -295,12 +351,14 @@ pub const ConsoleOverlay = struct {
             }
         }
         self.last_rect = rect;
+        self.last_content_rect = null;
 
         var overlay_view = view.subView(rect);
         overlay_view.fill(Cell.styled(' ', self.panel_style.fg, self.panel_style.bg, self.panel_style.attrs));
 
         if (rect.width < 2 or rect.height < 2) {
             self.last_content_lines = rect.height;
+            self.last_content_rect = rect;
             self.renderEntries(&overlay_view, overlay_view.size());
             return;
         }
@@ -320,6 +378,9 @@ pub const ConsoleOverlay = struct {
         }
         self.last_content_lines = content_height;
 
+        const content_rect = Event.Rect{ .x = rect.x + 1, .y = rect.y + 1, .width = content_width, .height = content_height };
+        self.last_content_rect = content_rect;
+
         var content_view = overlay_view.subView(.{ .x = 1, .y = 1, .width = content_width, .height = content_height });
         self.renderEntries(&content_view, content_view.size());
     }
@@ -338,6 +399,11 @@ pub const ConsoleOverlay = struct {
 
                 if (!self.focused) {
                     return .ignored;
+                }
+
+                if (keysMatch(self.copy_key, key)) {
+                    self.copySelection();
+                    return .consumed;
                 }
 
                 if (key.codepoint) |cp| {
@@ -381,12 +447,40 @@ pub const ConsoleOverlay = struct {
                     } else if (sp == .end) {
                         self.scrollToBottom();
                         return .consumed;
+                    } else if (sp == .escape) {
+                        if (self.selection != null) {
+                            self.clearSelection();
+                            return .consumed;
+                        }
                     }
                 }
             },
             .mouse => |mouse| {
                 if (!self.visible) return .ignored;
-                if (!self.isMouseInside(mouse.x, mouse.y)) return .ignored;
+                if (!self.isMouseInside(mouse.x, mouse.y)) {
+                    if (mouse.button == .release) {
+                        self.dragging = false;
+                    }
+                    return .ignored;
+                }
+                self.focused = true;
+                if (mouse.button == .left) {
+                    if (self.selectionPointFromMouse(mouse)) |point| {
+                        self.startSelection(point);
+                        self.dragging = true;
+                    }
+                    return .consumed;
+                } else if (mouse.button == .move) {
+                    if (self.dragging) {
+                        if (self.selectionPointFromMouse(mouse)) |point| {
+                            self.updateSelection(point);
+                        }
+                        return .consumed;
+                    }
+                } else if (mouse.button == .release) {
+                    self.dragging = false;
+                    return .consumed;
+                }
                 if (mouse.button == .wheel_up) {
                     self.scrollUp();
                     return .consumed;
@@ -434,6 +528,10 @@ pub const ConsoleOverlay = struct {
             const display_len = @min(text.len, @as(usize, available_width));
             if (display_len > 0) {
                 view.print(@intCast(text_x), @intCast(y), text[0..display_len], style.fg, style.bg, style.attrs);
+            }
+
+            if (self.selectionSpanForLine(idx, self.lineDisplayLen(entry))) |span| {
+                self.renderSelectionSpan(view, y, entry_view, span);
             }
         }
     }
@@ -485,6 +583,113 @@ pub const ConsoleOverlay = struct {
         return false;
     }
 
+    fn selectionPointFromMouse(self: *ConsoleOverlay, mouse: Event.Mouse) ?SelectionPoint {
+        const rect = self.last_content_rect orelse return null;
+        if (rect.width == 0 or rect.height == 0) return null;
+        if (mouse.x < rect.x or mouse.y < rect.y) return null;
+        if (mouse.x >= rect.x +| rect.width or mouse.y >= rect.y +| rect.height) return null;
+
+        const local_x: usize = @intCast(mouse.x - rect.x);
+        const local_y: usize = @intCast(mouse.y - rect.y);
+
+        const visible = rect.height;
+        const total = self.entry_count;
+        if (total == 0) return null;
+
+        const end_idx = if (total > self.scroll_offset) total - self.scroll_offset else 0;
+        const start_idx = if (end_idx > visible) end_idx - visible else 0;
+
+        const line_idx = start_idx + local_y;
+        if (line_idx >= end_idx) return null;
+
+        const entry_view = self.entryView(line_idx);
+        const line_len = self.lineDisplayLen(entry_view.entry);
+        const caret: usize = @min(local_x, line_len);
+        return .{ .line = line_idx, .col = caret };
+    }
+
+    fn startSelection(self: *ConsoleOverlay, point: SelectionPoint) void {
+        const focus = self.bumpSelectionPoint(point);
+        self.selection_anchor = point;
+        self.selection_focus = focus;
+        self.selection = normalizeSelection(point, focus);
+    }
+
+    fn updateSelection(self: *ConsoleOverlay, point: SelectionPoint) void {
+        const anchor = self.selection_anchor orelse return;
+        const focus = self.bumpSelectionPoint(point);
+        self.selection_focus = focus;
+        self.selection = normalizeSelection(anchor, focus);
+    }
+
+    fn clearSelection(self: *ConsoleOverlay) void {
+        self.selection_anchor = null;
+        self.selection_focus = null;
+        self.selection = null;
+        self.dragging = false;
+    }
+
+    fn bumpSelectionPoint(self: *ConsoleOverlay, point: SelectionPoint) SelectionPoint {
+        const entry_view = self.entryView(point.line);
+        const line_len = self.lineDisplayLen(entry_view.entry);
+        if (point.col < line_len) {
+            return .{ .line = point.line, .col = point.col + 1 };
+        }
+        return point;
+    }
+
+    fn selectionSpanForLine(self: *ConsoleOverlay, line_idx: usize, line_len: usize) ?SelectionSpan {
+        const selection = self.selection orelse return null;
+        if (line_idx < selection.start.line or line_idx > selection.end.line) return null;
+        var start_col: usize = 0;
+        var end_col: usize = line_len;
+        if (line_idx == selection.start.line) start_col = selection.start.col;
+        if (line_idx == selection.end.line) end_col = selection.end.col;
+        if (start_col >= end_col) return null;
+        return .{
+            .start_col = @min(start_col, line_len),
+            .end_col = @min(end_col, line_len),
+        };
+    }
+
+    fn renderSelectionSpan(self: *ConsoleOverlay, view: *PlaneView, y: u16, entry_view: EntryView, span: SelectionSpan) void {
+        const entry = entry_view.entry;
+        const selection_style = self.selection_style;
+        var start = span.start_col;
+        var end = span.end_col;
+        if (start >= end) return;
+
+        const prefix_len: usize = if (self.show_level) entry.level.prefix().len else 0;
+        const prefix_total = if (self.show_level) prefix_len + 1 else 0;
+
+        if (self.show_level) {
+            const prefix = entry.level.prefix();
+            if (start < prefix_total) {
+                const prefix_end = @min(end, prefix_total);
+                if (start < prefix.len) {
+                    const part_end = @min(prefix.len, prefix_end);
+                    view.print(@intCast(start), @intCast(y), prefix[start..part_end], selection_style.fg, selection_style.bg, selection_style.attrs);
+                    if (prefix_end > prefix.len) {
+                        view.print(@intCast(part_end), @intCast(y), " ", selection_style.fg, selection_style.bg, selection_style.attrs);
+                    }
+                } else {
+                    view.print(@intCast(start), @intCast(y), " ", selection_style.fg, selection_style.bg, selection_style.attrs);
+                }
+            }
+            if (end <= prefix_total) return;
+            start = if (start > prefix_total) start - prefix_total else 0;
+            end -= prefix_total;
+        }
+
+        const text = self.entryText(entry_view.slot, entry.len);
+        const text_start = @min(start, text.len);
+        const text_end = @min(end, text.len);
+        if (text_end > text_start) {
+            const x = if (self.show_level) @as(u16, @intCast(text_start + prefix_total)) else @as(u16, @intCast(text_start));
+            view.print(x, @intCast(y), text[text_start..text_end], selection_style.fg, selection_style.bg, selection_style.attrs);
+        }
+    }
+
     fn entrySlotIndex(self: *ConsoleOverlay, logical_index: usize) usize {
         if (self.entry_count < self.max_entries) {
             return logical_index;
@@ -512,8 +717,58 @@ pub const ConsoleOverlay = struct {
         if (self.last_rect) |rect| {
             clearRect(view, rect);
             self.last_rect = null;
+            self.last_content_rect = null;
         }
         self.last_content_lines = 0;
+    }
+
+    fn lineDisplayLen(self: *ConsoleOverlay, entry: Entry) usize {
+        if (!self.show_level) return entry.len;
+        return entry.level.prefix().len + 1 + entry.len;
+    }
+
+    fn appendLineSegment(self: *ConsoleOverlay, buffer: *std.ArrayList(u8), entry_view: EntryView, start_col: usize, end_col: usize) !void {
+        var start = start_col;
+        var end = end_col;
+        if (start >= end) return;
+
+        if (self.show_level) {
+            const prefix = entry_view.entry.level.prefix();
+            const prefix_total = prefix.len + 1;
+            if (start < prefix_total) {
+                const prefix_end = @min(end, prefix_total);
+                if (start < prefix.len) {
+                    const part_end = @min(prefix.len, prefix_end);
+                    try buffer.appendSlice(prefix[start..part_end]);
+                    if (prefix_end > prefix.len) {
+                        try buffer.append(' ');
+                    }
+                } else {
+                    try buffer.append(' ');
+                }
+            }
+            if (end <= prefix_total) return;
+            start = if (start > prefix_total) start - prefix_total else 0;
+            end -= prefix_total;
+        }
+
+        const text = self.entryText(entry_view.slot, entry_view.entry.len);
+        const text_start = @min(start, text.len);
+        const text_end = @min(end, text.len);
+        if (text_end > text_start) {
+            try buffer.appendSlice(text[text_start..text_end]);
+        }
+    }
+
+    fn copySelection(self: *ConsoleOverlay) void {
+        const handler = self.on_copy orelse return;
+        const selection = self.selection orelse return;
+        _ = selection;
+        const text = self.selectionText(self.allocator) catch return;
+        if (text) |slice| {
+            defer self.allocator.free(slice);
+            handler(self.copy_ctx, slice);
+        }
     }
 
     pub const widget_vtable = Widget.VTable{
@@ -530,6 +785,126 @@ var global_console: ?*ConsoleOverlay = null;
 pub fn installGlobal(console: *ConsoleOverlay) void {
     global_console = console;
 }
+
+pub const CaptureStream = enum {
+    stdout,
+    stderr,
+};
+
+pub const StdIoCapture = if (builtin.os.tag == .windows) struct {
+    pub fn init(allocator: std.mem.Allocator, console: *ConsoleOverlay, stream: CaptureStream) !StdIoCapture {
+        _ = allocator;
+        _ = console;
+        _ = stream;
+        return error.Unsupported;
+    }
+
+    pub fn deinit(self: *StdIoCapture) void {
+        _ = self;
+    }
+} else struct {
+    allocator: std.mem.Allocator,
+    console: *ConsoleOverlay,
+    stream: CaptureStream,
+    thread: ?std.Thread = null,
+    pipe_read: std.posix.fd_t = -1,
+    pipe_write: std.posix.fd_t = -1,
+    original_fd: std.posix.fd_t = -1,
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+
+    pub fn init(allocator: std.mem.Allocator, console: *ConsoleOverlay, stream: CaptureStream) !StdIoCapture {
+        var capture = StdIoCapture{
+            .allocator = allocator,
+            .console = console,
+            .stream = stream,
+        };
+
+        const fds = try std.posix.pipe();
+        capture.pipe_read = fds[0];
+        capture.pipe_write = fds[1];
+
+        const target_fd: std.posix.fd_t = switch (stream) {
+            .stdout => std.posix.STDOUT_FILENO,
+            .stderr => std.posix.STDERR_FILENO,
+        };
+
+        capture.original_fd = try std.posix.dup(target_fd);
+        try std.posix.dup2(capture.pipe_write, target_fd);
+
+        capture.thread = try std.Thread.spawn(.{}, captureThread, .{&capture});
+        return capture;
+    }
+
+    pub fn deinit(self: *StdIoCapture) void {
+        if (self.original_fd >= 0) {
+            const target_fd: std.posix.fd_t = switch (self.stream) {
+                .stdout => std.posix.STDOUT_FILENO,
+                .stderr => std.posix.STDERR_FILENO,
+            };
+            _ = std.posix.dup2(self.original_fd, target_fd) catch {};
+            std.posix.close(self.original_fd);
+            self.original_fd = -1;
+        }
+
+        self.done.store(true, .monotonic);
+        if (self.pipe_write >= 0) {
+            std.posix.close(self.pipe_write);
+            self.pipe_write = -1;
+        }
+        if (self.thread) |thread| {
+            thread.join();
+            self.thread = null;
+        }
+        if (self.pipe_read >= 0) {
+            std.posix.close(self.pipe_read);
+            self.pipe_read = -1;
+        }
+    }
+
+    fn captureThread(self: *StdIoCapture) void {
+        var buffer: [4096]u8 = undefined;
+        var pending = std.ArrayListUnmanaged(u8){};
+        defer pending.deinit(self.allocator);
+
+        while (!self.done.load(.monotonic)) {
+            const count = std.posix.read(self.pipe_read, &buffer) catch |err| switch (err) {
+                error.Interrupted => continue,
+                else => break,
+            };
+            if (count == 0) break;
+            var idx: usize = 0;
+            while (idx < count) {
+                if (std.mem.indexOfScalar(u8, buffer[idx..count], '\n')) |rel| {
+                    const next = idx + rel;
+                    _ = pending.appendSlice(self.allocator, buffer[idx..next]) catch {
+                        pending.clearRetainingCapacity();
+                    };
+                    self.flushPending(&pending);
+                    pending.clearRetainingCapacity();
+                    idx = next + 1;
+                } else {
+                    _ = pending.appendSlice(self.allocator, buffer[idx..count]) catch {
+                        pending.clearRetainingCapacity();
+                    };
+                    idx = count;
+                }
+            }
+        }
+
+        if (pending.items.len > 0) {
+            self.flushPending(&pending);
+        }
+    }
+
+    fn flushPending(self: *StdIoCapture, pending: *std.ArrayListUnmanaged(u8)) void {
+        if (pending.items.len == 0) return;
+        const level: LogLevel = switch (self.stream) {
+            .stdout => .info,
+            .stderr => .err,
+        };
+        self.console.append(level, pending.items);
+    }
+};
 
 pub fn uninstallGlobal(console: *ConsoleOverlay) void {
     if (global_console == console) {
@@ -662,6 +1037,35 @@ const EntryView = struct {
     slot: usize,
 };
 
+const SelectionPoint = struct {
+    line: usize,
+    col: usize,
+};
+
+const SelectionRange = struct {
+    start: SelectionPoint,
+    end: SelectionPoint,
+};
+
+const SelectionSpan = struct {
+    start_col: usize,
+    end_col: usize,
+};
+
+fn normalizeSelection(a: SelectionPoint, b: SelectionPoint) ?SelectionRange {
+    if (a.line == b.line and a.col == b.col) return null;
+    if (pointBefore(a, b)) {
+        return .{ .start = a, .end = b };
+    }
+    return .{ .start = b, .end = a };
+}
+
+fn pointBefore(a: SelectionPoint, b: SelectionPoint) bool {
+    if (a.line < b.line) return true;
+    if (a.line > b.line) return false;
+    return a.col < b.col;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -681,4 +1085,27 @@ test "ConsoleOverlay ring overwrites oldest" {
 
     try std.testing.expectEqualStrings("two", overlay.entryText(first.slot, first.entry.len));
     try std.testing.expectEqualStrings("thre", overlay.entryText(second.slot, second.entry.len));
+}
+
+test "ConsoleOverlay selectionText spans lines" {
+    var overlay = try ConsoleOverlay.init(std.testing.allocator, .{
+        .max_entries = 4,
+        .max_entry_len = 16,
+        .show_level = false,
+    });
+    defer overlay.deinit();
+
+    overlay.append(.info, "hello");
+    overlay.append(.info, "world");
+
+    overlay.selection = normalizeSelection(
+        .{ .line = 0, .col = 1 },
+        .{ .line = 1, .col = 2 },
+    );
+
+    const selected = try overlay.selectionText(std.testing.allocator);
+    defer if (selected) |slice| std.testing.allocator.free(slice);
+
+    try std.testing.expect(selected != null);
+    try std.testing.expectEqualStrings("ello\nwo", selected.?);
 }
