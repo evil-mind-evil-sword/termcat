@@ -1,5 +1,27 @@
 # CLI Infrastructure Extensions Design
 
+Status: Draft
+Last updated: 2026-01-28
+Owner: termcat
+Scope: termcat CLI parsing extensions
+Related issues: workshop-3n72e9x, workshop-585hezx
+References: None
+
+## Summary
+
+Design notes for termcat CLI extensions that originated from pluckz
+integration gaps. The major extensions are now implemented; this document
+captures the behavior, usage, and remaining open questions.
+
+## Implementation status
+
+- Default command: Implemented in `parseApp()` via `default_command`
+  (Parser.zig:1042-1167).
+- Variadic positionals: Implemented via `cli.Command.VariadicSlice` and parser
+  support (Command.zig; Parser.zig:280-411).
+- Standalone help: Implemented via `parseWithHelp()` and `Help.generateHelp()`
+  (Parser.zig:88-114).
+
 ## Context
 
 The pluckz project encountered three limitations when integrating with
@@ -8,25 +30,29 @@ limitations and proposes extensions.
 
 **Source**: pluckz/src/cli/cli.zig partial integration pattern
 
-## Limitation 1: No Default Command
+## Extension 1: Default Command
 
-### Problem
+### Background
 
-`parseApp()` requires an explicit command name. Apps with a "default mode" (no
-subcommand = run main functionality) must handle this manually.
+`parseApp()` originally required an explicit command name. Apps with a
+"default mode" (no subcommand = run main functionality) had to handle this
+manually.
 
-**Current behavior** (Parser.zig:688-691):
+**Current behavior** (Parser.zig:1044-1050):
 
 ```zig
 if (i >= args.len) {
+    if (@hasDecl(App, "default_command")) {
+        return dispatchToCommand(..., App.default_command, &.{}, ...);
+    }
     return .{ .err = CliError.usageError("missing command") };
 }
 ```
 
-**Workaround**: pluckz checks for `auth` subcommand first, then falls back to
-`Parser.parse()` for GlobalOptions only.
+**Historical workaround**: pluckz checked for the `auth` subcommand first, then
+fell back to `Parser.parse()` for `GlobalOptions` only.
 
-### Proposed Solution
+### Current usage
 
 Add optional `default_command` declaration:
 
@@ -35,7 +61,7 @@ pub const MyApp = struct {
     pub const meta = .{ .name = "myapp" };
     pub const GlobalOptions = struct { verbose: bool = false };
 
-    // NEW: Default command when no subcommand provided
+    // Default command when no subcommand provided
     pub const default_command: []const u8 = "run";
 
     pub const Command = cli.Commands(.{
@@ -49,14 +75,11 @@ pub const MyApp = struct {
 
 ```zig
 if (i >= args.len) {
-    // Check for default_command declaration
     if (@hasDecl(App, "default_command")) {
-        const cmd_name = App.default_command;
         // Dispatch to default command with empty args
-        // ... existing command dispatch logic ...
-    } else {
-        return .{ .err = CliError.usageError("missing command") };
+        return dispatchToCommand(..., App.default_command, &.{}, ...);
     }
+    return .{ .err = CliError.usageError("missing command") };
 }
 ```
 
@@ -68,7 +91,7 @@ directly:
 ```zig
 pub const GlobalOptions = struct {
     verbose: bool = false,
-    files: VariadicPositional([]const u8),  // See Limitation 2
+    files: cli.Command.VariadicSlice = .{}, // See Extension 2
 
     pub const positional = .{.files};
 };
@@ -78,14 +101,15 @@ This is more complex but matches pluckz's actual need.
 
 ---
 
-## Limitation 2: No Variable Positional Arguments
+## Extension 2: Variadic Positionals
 
-### Problem
+### Background
 
-Commands can only declare fixed positional arguments. Variable-length
-positionals like `[files...]` require pre-filtering args before parsing.
+Commands previously could only declare fixed positional arguments. Variable-
+length positionals like `[files...]` required pre-filtering args before parsing.
+This is now supported via `cli.Command.VariadicSlice`.
 
-**Current behavior** (Parser.zig:203-204):
+**Current behavior** (Parser.zig:280-293):
 
 ```zig
 } else {
@@ -93,19 +117,19 @@ positionals like `[files...]` require pre-filtering args before parsing.
 }
 ```
 
-**Workaround**: pluckz pre-filters file arguments into a separate ArrayList
-before calling `Parser.parse()`.
+**Historical workaround**: pluckz pre-filtered file arguments into a separate
+`ArrayList` before calling `Parser.parse()`.
 
-### Proposed Solution A: Variadic Marker Type
+### Current implementation: VariadicSlice (zero-copy)
 
-Introduce a marker type that signals "collect remaining args":
+Declare a variadic positional as the final positional field:
 
 ```zig
 pub const Command = struct {
     output: []const u8,
-    files: cli.Variadic([]const u8),  // Collects all remaining positionals
+    files: cli.Command.VariadicSlice = .{}, // Captures remaining positionals
 
-    pub const positional = .{ .output, .files };  // files must be last
+    pub const positional = .{ .output, .files };
 
     pub const fields = .{
         .output = .{ .description = "Output file" },
@@ -114,152 +138,64 @@ pub const Command = struct {
 };
 ```
 
-**Variadic type definition**:
+Use the original args slice to materialize items:
 
 ```zig
-pub fn Variadic(comptime T: type) type {
-    return struct {
-        items: []const T,
-
-        pub const is_variadic = true;
-        pub const ItemType = T;
-    };
-}
+const result = parse(Command, args);
+const files = result.files.items(args);
 ```
 
-**Parser changes**:
+The parser captures indices into the args slice (Parser.zig:363-411), so the
+variadic field must be the final positional entry.
 
-```zig
-// In parse(), when processing positionals:
-if (positional_index < positional_fields.len) {
-    const field_name = positional_fields[positional_index];
+### Alternative (not implemented): trailing slice convention
 
-    if (isVariadicField(T, field_name)) {
-        // Collect ALL remaining positional args
-        var variadic_items = std.ArrayList(FieldItemType).init(allocator);
-        variadic_items.append(arg);
-        while (i + 1 < args.len and !isOption(args[i + 1])) {
-            i += 1;
-            variadic_items.append(args[i]);
-        }
-        setVariadicField(&result, field_name, variadic_items.items);
-    } else {
-        // Existing single-value logic
-    }
-}
-```
+If the last positional is `[][]const u8`, treat it as variadic. This remains a
+possible future extension but is not implemented today.
 
-### Proposed Solution B: Trailing Slice Convention
+### Allocation considerations
 
-Simpler approach: if the last positional is `[][]const u8`, treat it as
-variadic:
-
-```zig
-pub const Command = struct {
-    output: []const u8,
-    files: [][]const u8,  // Last positional = variadic
-
-    pub const positional = .{ .output, .files };
-};
-```
-
-**Pros**: No new types needed **Cons**: Less explicit, requires allocation
-
-### Allocation Consideration
-
-Both solutions require runtime allocation for the slice. Options:
-
-1. Require allocator parameter to `parse()`
-2. Use bounded array: `files: std.BoundedArray([]const u8, 256)`
-3. Return indices into original args slice (zero-copy but less ergonomic)
-
-**Recommendation**: Add optional allocator parameter with bounded array
-fallback:
-
-```zig
-pub fn parse(comptime T: type, args: []const []const u8) ParseResult(T) { ... }
-pub fn parseAlloc(comptime T: type, args: []const []const u8, allocator: Allocator) ParseResultAlloc(T) { ... }
-```
+The current implementation is zero-copy. If an owned slice is needed, consider
+adding an allocation helper (e.g., `parseAlloc`) or use a bounded array in the
+command type.
 
 ---
 
-## Limitation 3: Help Without parseApp()
+## Extension 3: Standalone Help Utilities
 
-### Problem
+### Background
 
-Auto-generated help via `Help.zig` is designed for parseApp() integration.
-Commands that use `parse()` directly lose help generation.
+Auto-generated help via `Help.zig` was originally designed for `parseApp()`
+integration. Commands that used `parse()` directly had to duplicate help and
+version handling.
 
-**Workaround**: pluckz has manual `printHelp()` function duplicating termcat.cli
-knowledge.
+### Current implementation
 
-### Proposed Solution
-
-Add standalone help generation for single commands:
+Use `parseWithHelp()` to parse a single command type and automatically print
+help/version output:
 
 ```zig
-// Already exists: generateHelp(T) for command types
-// Add: utility that combines parse + help handling
-
-pub fn parseWithHelp(
-    comptime T: type,
-    args: []const []const u8,
-    writer: anytype,
-    comptime options: struct {
-        app_name: []const u8 = "",
-        include_version: bool = true,
-    },
-) union(enum) {
-    ok: T,
-    err: CliError,
-    handled: void,  // Help/version was printed
-} {
-    const result = parse(T, args);
-    switch (result) {
-        .help => {
-            const help_text = Help.generateHelp(T);
-            writer.writeAll(help_text);
-            return .handled;
-        },
-        .version => {
-            if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "version")) {
-                writer.print("{s} {s}\n", .{options.app_name, T.meta.version});
-            }
-            return .handled;
-        },
-        .ok => |v| return .{ .ok = v },
-        .err => |e| return .{ .err = e },
-    }
+const result = parseWithHelp(Options, args, writer);
+switch (result) {
+    .ok => |opts| runWithOptions(opts),
+    .err => |err| return err,
+    .handled => return, // Help/version was printed
 }
 ```
+
+`parseWithHelp()` uses `Help.generateHelp()` and pulls `meta.version` if
+present on the command type.
 
 ### App-Level Help for Non-parseApp Usage
 
-For apps that manually dispatch commands but want unified help:
+For apps that manually dispatch commands but want unified help output, call
+`Help.generateAppHelp()` (or `cli.printAppHelp()`):
 
 ```zig
-pub fn generateAppHelpManual(
-    comptime GlobalOptions: type,
-    comptime commands: anytype,  // Tuple of command types
-    comptime meta: AppMeta,
-) []const u8 { ... }
+try Help.generateAppHelp(MyApp, writer);
 ```
 
 ---
-
-## Implementation Priority
-
-| Extension                 | Complexity | Impact | Priority |
-| ------------------------- | ---------- | ------ | -------- |
-| Default command           | Low        | Medium | P2       |
-| Variadic positionals      | Medium     | High   | P1       |
-| Standalone help utilities | Low        | Medium | P2       |
-
-**Recommendation**: Start with variadic positionals (P1) as it addresses the
-most common CLI pattern (multiple input files).
-
----
-
 ## Alternatives Considered
 
 ### 1. External Args Pre-processing
@@ -339,44 +275,21 @@ The `--` separator signals "all following args are positional, not options":
 myapp --verbose -- --file-starting-with-dash.txt -another-file.txt
 ```
 
-**Current state**: `parseApp()` handles `--` (Parser.zig:596-599), but base
-`parse()` does not.
-
-**Required change**: Add `--` handling to `parse()` for variadic positionals:
-
-```zig
-// In parse(), add to main loop:
-if (std.mem.eql(u8, arg, "--")) {
-    // Collect all remaining args as positionals
-    for (args[i+1..]) |remaining| {
-        if (positional_index < positional_fields.len) {
-            // ... assign to positional field
-        }
-    }
-    break;
-}
-```
+**Current state**: `parse()` handles `--` (Parser.zig:180-197) and routes the
+remaining args through the positional/variadic handling. Any future extensions
+should preserve this separator behavior.
 
 ---
 
-## Zero-Allocation Variadic Approach
+## VariadicSlice details (current implementation)
 
-Instead of allocating a new slice, return indices into the original `args`
-array:
+`cli.Command.VariadicSlice` stores indices into the original `args` slice,
+avoiding allocation. Example:
 
 ```zig
-pub const VariadicSlice = struct {
-    start: usize,
-    end: usize,
-
-    pub fn items(self: @This(), args: []const []const u8) []const []const u8 {
-        return args[self.start..self.end];
-    }
-};
-
 pub const Command = struct {
     output: []const u8,
-    files: VariadicSlice,  // Zero-copy reference
+    files: cli.Command.VariadicSlice = .{}, // Zero-copy reference
 
     pub const positional = .{ .output, .files };
 };
@@ -386,7 +299,7 @@ pub const Command = struct {
 
 ```zig
 const result = parse(Command, args);
-const files = result.files.items(args);  // Caller provides original args
+const files = result.files.items(args); // Caller provides original args
 ```
 
 **Tradeoffs**:
@@ -397,59 +310,23 @@ const files = result.files.items(args);  // Caller provides original args
 | `VariadicSlice` | No         | Extra call    | Tied to args |
 | `BoundedArray`  | No (stack) | Limited size  | Owned        |
 
-**Recommendation**: Offer both. Default to `VariadicSlice` for zero-copy, add
-`parseAlloc()` for owned slice.
+**Note**: The current implementation defaults to `VariadicSlice`; an
+allocation-based helper could be added in the future if needed.
 
 ---
 
-## Help Generation Updates
+## Help Generation (current)
 
-### Default Command Display
+### Default command display
 
-When `default_command` is declared, help should show:
+When `default_command` is declared, `generateAppHelp()` prints both the default
+mode and explicit command usage lines and annotates the default command in the
+command list (Help.zig:149-172).
 
-```
-Usage: myapp [OPTIONS] [FILES...]       (default mode)
-       myapp <command> [OPTIONS]        (subcommand mode)
+### Variadic positional display
 
-Commands:
-  run      Run the application (default)
-  config   Manage configuration
-```
-
-**Implementation**: Check for `default_command` in `generateAppHelp()`:
-
-```zig
-if (@hasDecl(App, "default_command")) {
-    // Find default command's positionals for usage line
-    const default_cmd = getCommandByName(App.Command, App.default_command);
-    const positionals = getPositionalUsage(default_cmd);
-    try writer.print("Usage: {s} [OPTIONS] {s}\n", .{meta.name, positionals});
-    try writer.print("       {s} <command> [OPTIONS]\n\n", .{meta.name});
-} else {
-    try writer.print("Usage: {s} <command> [OPTIONS]\n\n", .{meta.name});
-}
-```
-
-### Variadic Positional Display
-
-Variadic fields display with `...` suffix:
-
-```
-Arguments:
-  <output>    Output file
-  <files>...  Input files (one or more)
-```
-
-**Implementation**: Detect variadic in `generateHelp()`:
-
-```zig
-if (isVariadicField(T, field.name)) {
-    try writer.print("  <{s}>...  {s}\n", .{field.name, spec.description});
-} else {
-    try writer.print("  <{s}>     {s}\n", .{field.name, spec.description});
-}
-```
+Usage lines and argument lists include the `...` suffix for variadic
+positionals (Help.zig:25-58).
 
 ---
 
@@ -512,8 +389,8 @@ regardless of nesting depth.
 
 ## Open Questions
 
-1. **Allocator threading**: Should parseAlloc return an arena that caller must
-   free, or individual allocations?
+1. **Owned variadic slices**: Should we add an allocation helper (e.g.,
+   `parseAlloc`) or keep `VariadicSlice` as the only supported form?
 
 2. **Help customization**: How much should generated help be customizable
    (section order, formatting)?
@@ -521,5 +398,14 @@ regardless of nesting depth.
 3. **Error context for variadics**: How to report errors in variadic args (which
    file failed to validate)?
 
-4. **Minimum variadic count**: Should variadic support
-   `files: Variadic([]const u8, .{.min = 1})` for "at least one required"?
+4. **Minimum variadic count**: Should variadic positionals support a minimum
+   count via metadata (e.g., a required count on positional specs)?
+
+## Related issues
+
+- workshop-3n72e9x - Support default commands and variadic positionals in termcat.cli.
+- workshop-585hezx - Remove duplicate doc and normalize metadata for termcat CLI design notes.
+
+## References
+
+None.
