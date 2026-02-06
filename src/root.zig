@@ -78,6 +78,10 @@ pub const input = struct {
     pub const KeyStateTracker = @import("input/KeyStateTracker.zig");
 };
 
+// Line-mode REPL helpers
+pub const LineMode = @import("LineMode.zig").LineMode;
+pub const LineOutput = @import("LineMode.zig").LineOutput;
+
 // Backend
 pub const backend = struct {
     pub const posix = @import("backend/posix.zig");

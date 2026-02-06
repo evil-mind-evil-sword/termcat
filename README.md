@@ -385,6 +385,31 @@ while (i < args.len) : (i += 1) {
 }
 ```
 
+## Line Mode (REPL)
+
+Use `termcat.LineMode` when you want raw key decoding without entering the
+alternate screen buffer and with normal stdout scrolling. `LineOutput` handles
+optional `\n` → `\r\n` normalization (enabled by default on Windows).
+
+```zig
+const termcat = @import("termcat");
+
+var line = try termcat.LineMode.init(allocator, .{});
+defer line.deinit();
+
+var out = line.writer();
+try out.print("Welcome to the REPL\n", .{});
+
+while (try line.pollEvent(100)) |event| {
+    switch (event) {
+        .key => |key| {
+            if (key.codepoint == 'q') break;
+        },
+        else => {},
+    }
+}
+```
+
 ## Examples
 
 ```bash
