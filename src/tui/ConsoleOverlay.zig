@@ -914,7 +914,7 @@ pub fn uninstallGlobal(console: *ConsoleOverlay) void {
 
 pub fn logFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {

@@ -229,7 +229,7 @@ pub const Modal = struct {
 
         // Consume mouse clicks on backdrop to prevent click-through
         switch (event) {
-            .mouse => |_| {
+            .mouse => {
                 if (self.show_backdrop) {
                     return .consumed;
                 }

@@ -290,7 +290,7 @@ pub fn build(b: *std.Build) void {
             c_files[i] = b.fmt("deps/doomgeneric/doomgeneric/{s}", .{src});
         }
 
-        doom_exe.addCSourceFiles(.{
+        doom_exe.root_module.addCSourceFiles(.{
             .root = b.path("."),
             .files = &c_files,
             .flags = &.{

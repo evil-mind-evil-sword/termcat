@@ -299,41 +299,26 @@ pub fn Commands(comptime cmd_defs: anytype) type {
         @compileError("Commands requires at least one command type");
     }
 
-    comptime var union_fields: [fields.len]std.builtin.Type.UnionField = undefined;
+    // Zig 0.16 split `@Type` into per-kind builtins. We build the tagged
+    // union by handing @Union three parallel arrays (names, types,
+    // attributes) plus a tag enum produced by @Enum from the same names.
+    const TagInt = std.math.IntFittingRange(0, fields.len - 1);
+
+    comptime var names: [fields.len][:0]const u8 = undefined;
+    comptime var tag_values: [fields.len]TagInt = undefined;
+    comptime var union_types: [fields.len]type = undefined;
+    comptime var union_attrs: [fields.len]std.builtin.Type.UnionField.Attributes = undefined;
 
     inline for (fields, 0..) |field, i| {
         const CmdType = @field(cmd_defs, field.name);
-        union_fields[i] = .{
-            .name = field.name,
-            .type = CmdType,
-            .alignment = @alignOf(CmdType),
-        };
+        names[i] = field.name;
+        tag_values[i] = @intCast(i);
+        union_types[i] = CmdType;
+        union_attrs[i] = .{};
     }
 
-    return @Type(.{
-        .@"union" = .{
-            .layout = .auto,
-            .tag_type = blk: {
-                comptime var tag_fields: [fields.len]std.builtin.Type.EnumField = undefined;
-                inline for (fields, 0..) |field, i| {
-                    tag_fields[i] = .{
-                        .name = field.name,
-                        .value = i,
-                    };
-                }
-                break :blk @Type(.{
-                    .@"enum" = .{
-                        .tag_type = std.math.IntFittingRange(0, fields.len - 1),
-                        .fields = &tag_fields,
-                        .decls = &.{},
-                        .is_exhaustive = true,
-                    },
-                });
-            },
-            .fields = &union_fields,
-            .decls = &.{},
-        },
-    });
+    const TagType = @Enum(TagInt, .exhaustive, &names, &tag_values);
+    return @Union(.auto, TagType, &names, &union_types, &union_attrs);
 }
 
 /// Create a subcommand group with optional metadata.
