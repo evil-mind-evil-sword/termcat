@@ -358,14 +358,14 @@ pub fn generateUsage(comptime T: type, writer: anytype) !void {
 }
 
 /// Print help to a file.
-pub fn printHelp(comptime T: type, file: std.fs.File) void {
-    var file_writer = file.writer(&.{});
+pub fn printHelp(comptime T: type, file: std.Io.File) void {
+    var file_writer = file.writer(std.Options.debug_io, &.{});
     generateHelp(T, &file_writer.interface) catch {};
 }
 
 /// Print app help to a file.
-pub fn printAppHelp(comptime App: type, file: std.fs.File) void {
-    var file_writer = file.writer(&.{});
+pub fn printAppHelp(comptime App: type, file: std.Io.File) void {
+    var file_writer = file.writer(std.Options.debug_io, &.{});
     generateAppHelp(App, &file_writer.interface) catch {};
 }
 
@@ -390,11 +390,11 @@ test "generateHelp basic" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateHelp(TestCmd, stream.writer());
+    try generateHelp(TestCmd, &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "test") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "A test command") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "--verbose") != null);
@@ -426,11 +426,11 @@ test "generateAppHelp" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateAppHelp(TestApp, stream.writer());
+    try generateAppHelp(TestApp, &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "myapp 1.0.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "list") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "show") != null);
@@ -453,11 +453,11 @@ test "generateCommandHelp for regular command" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateCommandHelp(TestApp, "list", stream.writer());
+    try generateCommandHelp(TestApp, "list", &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "list") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "List all items") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "--all") != null);
@@ -485,11 +485,11 @@ test "generateCommandHelp for subcommand group" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateCommandHelp(TestApp, "bib", stream.writer());
+    try generateCommandHelp(TestApp, "bib", &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "bib") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "Manage bibliography") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "Subcommands:") != null);
@@ -522,11 +522,11 @@ test "generateAppHelp shows subcommand group descriptions" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateAppHelp(TestApp, stream.writer());
+    try generateAppHelp(TestApp, &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     // Verify subcommand group description is shown
     try std.testing.expect(std.mem.indexOf(u8, result, "bib") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "Manage bibliography entries") != null);
@@ -548,11 +548,11 @@ test "generateHelp shows hyphenated option names" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
-    try generateHelp(TestCmd, stream.writer());
+    try generateHelp(TestCmd, &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     // Should show hyphens, not underscores
     try std.testing.expect(std.mem.indexOf(u8, result, "--min-year") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "--max-results") != null);
@@ -579,12 +579,12 @@ test "generateCommandHelp resolves alias" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     // Looking up by alias should work
-    try generateCommandHelp(TestApp, "ls", stream.writer());
+    try generateCommandHelp(TestApp, "ls", &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "list") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "List all items") != null);
 }
@@ -607,12 +607,12 @@ test "generateCommandHelp finds nested subcommand" {
     };
 
     var buf: [2048]u8 = undefined;
-    var stream = std.io.fixedBufferStream(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
 
     // Looking up nested subcommand by name should work
-    try generateCommandHelp(TestApp, "add", stream.writer());
+    try generateCommandHelp(TestApp, "add", &writer);
 
-    const result = stream.getWritten();
+    const result = writer.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "add") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "Add bibliography entry") != null);
 }

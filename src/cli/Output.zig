@@ -6,6 +6,27 @@
 const std = @import("std");
 const CliError = @import("Error.zig").CliError;
 const writeJsonEscaped = @import("Error.zig").writeJsonEscaped;
+const fs_io = std.Options.debug_io;
+
+fn fileWriteAll(file: std.Io.File, bytes: []const u8) !void {
+    var buf: [4096]u8 = undefined;
+    var writer = file.writer(fs_io, &buf);
+    try writer.interface.writeAll(bytes);
+    try writer.interface.flush();
+}
+
+fn fileReadAt(file: std.Io.File, buffer: []u8, offset: u64) !usize {
+    return file.readPositionalAll(fs_io, buffer, offset);
+}
+
+fn fileReadToEndAlloc(allocator: std.mem.Allocator, file: std.Io.File, limit: usize) ![]u8 {
+    const len = try file.length(fs_io);
+    if (len > limit) return error.StreamTooLong;
+    const bytes = try allocator.alloc(u8, @intCast(len));
+    errdefer allocator.free(bytes);
+    const bytes_read = try fileReadAt(file, bytes, 0);
+    return bytes[0..bytes_read];
+}
 
 /// Output mode determines formatting strategy.
 pub const Mode = enum {
@@ -44,7 +65,7 @@ pub const ColorMode = enum {
 /// Wraps a writer with mode and formatting state.
 pub const Output = struct {
     /// The underlying file for output.
-    file: std.fs.File,
+    file: std.Io.File,
     mode: Mode,
     color: ColorMode,
     width: u16,
@@ -58,13 +79,13 @@ pub const Output = struct {
     /// Note: Uses page_allocator by default; for frequent JSON output,
     /// use initWithAllocator() with an arena or general purpose allocator.
     pub fn init() Self {
-        const stdout = std.fs.File.stdout();
+        const stdout = std.Io.File.stdout();
         return .{
             .file = stdout,
             .mode = .human,
             .color = .auto,
             .width = 80, // Default width; use termcat.tui for actual terminal size
-            .is_tty = stdout.isTty(),
+            .is_tty = stdout.isTty(fs_io) catch false,
             .allocator = std.heap.page_allocator,
         };
     }
@@ -72,19 +93,19 @@ pub const Output = struct {
     /// Initialize output context with stdout and custom allocator.
     /// Prefer this for frequent JSON output to avoid per-allocation syscalls.
     pub fn initWithAllocator(allocator: std.mem.Allocator) Self {
-        const stdout = std.fs.File.stdout();
+        const stdout = std.Io.File.stdout();
         return .{
             .file = stdout,
             .mode = .human,
             .color = .auto,
             .width = 80,
-            .is_tty = stdout.isTty(),
+            .is_tty = stdout.isTty(fs_io) catch false,
             .allocator = allocator,
         };
     }
 
     /// Initialize with explicit file and allocator (for testing).
-    pub fn initWithFile(file: std.fs.File, allocator: std.mem.Allocator) Self {
+    pub fn initWithFile(file: std.Io.File, allocator: std.mem.Allocator) Self {
         return .{
             .file = file,
             .mode = .human,
@@ -134,8 +155,8 @@ pub const Output = struct {
                     error.OutOfMemory => return error.OutOfMemory,
                 };
                 defer self.allocator.free(json_str);
-                try self.file.writeAll(json_str);
-                try self.file.writeAll("\n");
+                try fileWriteAll(self.file, json_str);
+                try fileWriteAll(self.file, "\n");
             },
             .quiet => {
                 for (values) |v| {
@@ -160,8 +181,8 @@ pub const Output = struct {
             error.OutOfMemory => return error.OutOfMemory,
         };
         defer self.allocator.free(json_str);
-        try self.file.writeAll(json_str);
-        try self.file.writeAll("\n");
+        try fileWriteAll(self.file, json_str);
+        try fileWriteAll(self.file, "\n");
     }
 
     /// Write quiet output (ID field only).
@@ -186,7 +207,7 @@ pub const Output = struct {
                         std.fmt.bufPrint(&buf, "{d}\n", .{id_value}) catch return error.FormatError
                     else
                         std.fmt.bufPrint(&buf, "{any}\n", .{id_value}) catch return error.FormatError;
-                    try self.file.writeAll(msg);
+                    try fileWriteAll(self.file, msg);
                     return;
                 }
             }
@@ -201,7 +222,7 @@ pub const Output = struct {
         const T = @TypeOf(value);
         const type_info = @typeInfo(T);
         // Empty buffer = unbuffered writes directly to file
-        var file_writer = self.file.writer(&.{});
+        var file_writer = self.file.writer(fs_io, &.{});
         const writer = &file_writer.interface;
 
         if (type_info == .@"struct") {
@@ -234,20 +255,20 @@ pub const Output = struct {
     /// Print a success message (suppressed in JSON/quiet mode).
     pub fn success(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        var file_writer = self.file.writer(&.{});
+        var file_writer = self.file.writer(fs_io, &.{});
         file_writer.interface.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an info message (suppressed in JSON/quiet mode).
     pub fn info(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.mode == .json or self.mode == .json_pretty or self.mode == .quiet) return;
-        var file_writer = self.file.writer(&.{});
+        var file_writer = self.file.writer(fs_io, &.{});
         file_writer.interface.print(fmt ++ "\n", args) catch return error.FormatError;
     }
 
     /// Print an error.
     pub fn err(self: *Self, error_val: CliError) !void {
-        var stderr_writer = std.fs.File.stderr().writer(&.{});
+        var stderr_writer = std.Io.File.stderr().writer(fs_io, &.{});
         const stderr = &stderr_writer.interface;
         var escape_buf: [1024]u8 = undefined;
 
@@ -285,12 +306,12 @@ pub const Output = struct {
 
     /// Raw write for custom formatting.
     pub fn write(self: *Self, bytes: []const u8) !void {
-        try self.file.writeAll(bytes);
+        try fileWriteAll(self.file, bytes);
     }
 
     /// Raw print for custom formatting.
     pub fn print(self: *Self, comptime fmt: []const u8, args: anytype) !void {
-        var file_writer = self.file.writer(&.{});
+        var file_writer = self.file.writer(fs_io, &.{});
         file_writer.interface.print(fmt, args) catch return error.FormatError;
     }
 };
@@ -299,8 +320,8 @@ test "Output mode selection" {
     // Create a temporary file for testing
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const tmp_file = tmp_dir.dir.createFile("test_output", .{ .read = true }) catch unreachable;
-    defer tmp_file.close();
+    const tmp_file = tmp_dir.dir.createFile(fs_io, "test_output", .{ .read = true }) catch unreachable;
+    defer tmp_file.close(fs_io);
 
     var output = Output.initWithFile(tmp_file, std.testing.allocator);
 
@@ -323,8 +344,8 @@ test "Output record formatting" {
     // Create a temporary file for testing
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const tmp_file = tmp_dir.dir.createFile("test_output", .{ .read = true }) catch unreachable;
-    defer tmp_file.close();
+    const tmp_file = tmp_dir.dir.createFile(fs_io, "test_output", .{ .read = true }) catch unreachable;
+    defer tmp_file.close(fs_io);
 
     var output = Output.initWithFile(tmp_file, std.testing.allocator);
 
@@ -340,21 +361,19 @@ test "Output record formatting" {
     try output.record(rec);
 
     // Seek back to read what was written
-    try tmp_file.seekTo(0);
     var read_buf: [1024]u8 = undefined;
-    const bytes_read = try tmp_file.readAll(&read_buf);
+    const bytes_read = try fileReadAt(tmp_file, &read_buf, 0);
     const json_output = read_buf[0..bytes_read];
     try std.testing.expect(std.mem.indexOf(u8, json_output, "\"id\":\"abc123\"") != null);
 
     // Quiet mode - create new file
-    const tmp_file2 = tmp_dir.dir.createFile("test_output2", .{ .read = true }) catch unreachable;
-    defer tmp_file2.close();
+    const tmp_file2 = tmp_dir.dir.createFile(fs_io, "test_output2", .{ .read = true }) catch unreachable;
+    defer tmp_file2.close(fs_io);
     output.file = tmp_file2;
     output.mode = .quiet;
     try output.record(rec);
 
-    try tmp_file2.seekTo(0);
-    const bytes_read2 = try tmp_file2.readAll(&read_buf);
+    const bytes_read2 = try fileReadAt(tmp_file2, &read_buf, 0);
     const quiet_output = read_buf[0..bytes_read2];
     try std.testing.expectEqualStrings("abc123\n", quiet_output);
 }
@@ -363,31 +382,27 @@ test "Output large content via print" {
     // Create a temporary file for testing
     var tmp_dir = std.testing.tmpDir(.{});
     defer tmp_dir.cleanup();
-    const tmp_file = try tmp_dir.dir.createFile("test_large", .{ .read = true });
-    defer tmp_file.close();
-
-    var output = Output.initWithFile(tmp_file, std.testing.allocator);
-
     // Test with increasing sizes to find the limit
     const sizes = [_]usize{ 1024, 4096, 8192, 16384, 32768, 65536 };
-    for (sizes) |size| {
-        // Reset file position
-        try tmp_file.seekTo(0);
-        try tmp_file.setEndPos(0);
+    for (sizes, 0..) |size, idx| {
+        var name_buf: [32]u8 = undefined;
+        const name = try std.fmt.bufPrint(&name_buf, "test_large_{d}", .{idx});
+        const tmp_file = try tmp_dir.dir.createFile(fs_io, name, .{ .read = true });
+        defer tmp_file.close(fs_io);
 
         const large_content = try std.testing.allocator.alloc(u8, size);
         defer std.testing.allocator.free(large_content);
         @memset(large_content, 'A');
 
         // Try printing via output.print
+        var output = Output.initWithFile(tmp_file, std.testing.allocator);
         output.print("{s}\n", .{large_content}) catch |err| {
             std.debug.print("FAILED at size {d}: {}\n", .{ size, err });
             return err;
         };
 
         // Verify content was written
-        try tmp_file.seekTo(0);
-        const written = try tmp_file.readToEndAlloc(std.testing.allocator, size * 2);
+        const written = try fileReadToEndAlloc(std.testing.allocator, tmp_file, size * 2);
         defer std.testing.allocator.free(written);
 
         try std.testing.expectEqual(size + 1, written.len); // +1 for newline

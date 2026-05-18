@@ -104,18 +104,10 @@ pub fn matchesFlag(arg: []const u8, short: ?u8, long: []const u8) bool {
     return false;
 }
 
-/// File-based writer type for stderr.
-const FileWriter = std.io.GenericWriter(std.fs.File, std.fs.File.WriteError, struct {
-    fn write(file: std.fs.File, bytes: []const u8) std.fs.File.WriteError!usize {
-        return file.write(bytes);
-    }
-}.write);
-
 /// Die with error message (for CLI error handling).
 pub fn die(comptime fmt: []const u8, args: anytype) noreturn {
-    const stderr = std.fs.File.stderr();
-    const writer = (FileWriter{ .context = stderr }).any();
-    writer.print("error: " ++ fmt ++ "\n", args) catch {};
+    var stderr_writer = std.Io.File.stderr().writer(std.Options.debug_io, &.{});
+    stderr_writer.interface.print("error: " ++ fmt ++ "\n", args) catch {};
     std.process.exit(1);
 }
 
